@@ -1,0 +1,132 @@
+我要做stm32f103zet6电路图，实现16路ad采集，8路uart通信，一路usb，14路iic，26+4路io，怎么分配引脚？最小系统还需要什么电路。因为14个同地址的iic总线设备，需要14路独立的iic口。这些管脚可以io模拟，速率不高。此外需要硬件spi/iic实现图片中的外接显示屏。
+
+可以分，但有一个硬约束要先定清楚：STM32F103ZET6 只有 5 路硬件 USART/UART，不是 8 路。ST 数据手册列的是 USART=5、I2C=2、SPI=3、USB=1、GPIO=112、ADC 通道最多 21 路；RM0008 也确认 USART1/2/3 的可重映射关系。
+资料依据：STM32F103xC/D/E datasheet、RM0008 reference manual。
+
+下面给你一版可画原理图的推荐分配。
+
+总体策略
+
+16 路 ADC：用固定模拟输入 PA0-PA7、PB0-PB1、PC0-PC5。
+8 路 UART：5 路硬件 UART + 3 路低速软件 UART。
+14 路同地址 I2C：全部用 GPIO 模拟，每路独立 SCL/SDA。
+显示屏：SPI2 硬件驱 LCD/外部 Flash，I2C2 硬件接触摸 CTP。
+USB：固定 PA11/PA12。
+SWD 调试：保留 PA13/PA14。
+不使用 FSMC、SDIO、CAN。
+16 路 ADC
+
+功能	MCU 管脚
+AD1-AD8	PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7
+AD9-AD10	PB0, PB1
+AD11-AD16	PC0, PC1, PC2, PC3, PC4, PC5
+注意：这些脚不要接 5V。每路建议预留 RC 滤波，例如 100Ω-1k 串阻 + 1nF-100nF 到 AGND，具体看采样速度和信号源阻抗。
+
+8 路 UART
+
+UART	类型	TX	RX	说明
+UART1	硬件 USART1	PA9	PA10	默认映射
+UART2	硬件 USART2	PD5	PD6	USART2 重映射
+UART3	硬件 USART3	PD8	PD9	USART3 全重映射
+UART4	硬件 UART4	PC10	PC11	默认
+UART5	硬件 UART5	PC12	PD2	默认
+UART6	软件 UART	PE0	PE1	低速建议
+UART7	软件 UART	PE2	PE3	低速建议
+UART8	软件 UART	PE4	PE5	低速建议
+如果 8 路 UART 都要稳定高速、同时收发，建议换 MCU 或加 UART 扩展芯片，例如 SPI 接 SC16IS752/SC16IS762 之类。
+
+USB
+
+功能	管脚
+USB_DM	PA11
+USB_DP	PA12
+建议：D+/D- 串 22Ω，USB 口加 ESD，D+ 上拉 1.5k 到 3.3V，VBUS 做电源检测/保护。PA11/PA12 不再分配给其他功能。
+
+显示屏接口，按你图里的 J3/J4
+
+显示屏信号	MCU 管脚
+LCD_CS	PB12
+LCD_MOSI	PB15 / SPI2_MOSI
+LCD_SCLK	PB13 / SPI2_SCK
+LCD_MISO	PB14 / SPI2_MISO
+LCD_RST	PG0
+LCD_INT	PG1
+CTP_INT	PG2
+CTP_SCL	PB10 / I2C2_SCL
+CTP_SDA	PB11 / I2C2_SDA
+CTP_RST	PG3
+VCC5V	5V
+3.3V	3.3V
+GND	GND
+图中 P1 如果也要接：
+
+P1 信号	MCU 管脚
+SF_CLK	PB13
+SF_DI	PB15
+SF_DO	PB14
+SF_CS	PG4
+LCD_RST	PG0
+3.3V	3.3V
+GND	GND
+这里 LCD 和 SF 可以共用 SPI2 的 SCK/MOSI/MISO，只要 CS 分开。
+
+14 路独立模拟 I2C
+每一路都要单独上拉，建议 4.7k-10k 到对应电压，软件模拟开漏：输出低为 0，释放为输入/高阻。
+
+I2C 路数	SCL	SDA
+I2C_SIM1	PF0	PF1
+I2C_SIM2	PF2	PF3
+I2C_SIM3	PF4	PF5
+I2C_SIM4	PF6	PF7
+I2C_SIM5	PF8	PF9
+I2C_SIM6	PF10	PF11
+I2C_SIM7	PF12	PF13
+I2C_SIM8	PF14	PF15
+I2C_SIM9	PG5	PG6
+I2C_SIM10	PG7	PG8
+I2C_SIM11	PG9	PG10
+I2C_SIM12	PG11	PG12
+I2C_SIM13	PG13	PG14
+I2C_SIM14	PE6	PE7
+30 路普通 IO，26+4
+
+IO 范围	MCU 管脚
+IO1-IO8（电磁阀1~8，高电平开阀）	PE8, PE9, PE10, PE11, PE12, PE13, PE14, PE15
+IO9-IO19（电磁阀9~19，高电平开阀）	PD0, PD1, PD3, PD4, PD7, PD10, PD11, PD12, PD13, PD14, PD15
+IO20	PG15（电磁阀20，高电平开阀）
+IO21-IO25（电磁阀21~25，高电平开阀）	PA15, PB6, PB7, PB8, PB9
+IO26-IO29	PC6（电磁阀26，高电平开阀）
+PC9 IO_5Vadj_ENABLE 高有效 开启PCBA5v供电
+PC13 IO_476Vadj_ENABLE 高有效 开启PCBA 4.5v供电
+PC9和PC13只能同时一个开启，可以同时关闭。
+PB1:IO_50mA_test_circuit_ENABLE 高电平有效 在受测的8块PCBA待机状态下，可以不开启。测量10uA待机电流时不开启。PCBA正式工作时需要开启。
+
+IO30	PA8
+PB2/BOOT1、PA15/PB3/PB4/JTAG、PC13-PC15 我先没用，留作启动/调试/RTC 余量更稳。
+
+SF_CLK		PB3 / SPI3_SCK
+SF_DO		PB4 / SPI3_MISO
+SF_DI		PB5 / SPI3_MOSI
+SF_CS		PG4
+LCD_RST		PG0
+（非U盘模式时SF所有相关引脚都需要配置成浮空输入模式,进入维护/烧录模式才启用 SPI3）
+
+PC3 KEY1 需要配置成上拉输入模式 低电平时按下按钮
+PC4 KEY2 需要配置成上拉输入模式 低电平时按下按钮
+PC5 KEY3 需要配置成上拉输入模式 低电平时按下按钮
+PC7  KEY4 需要配置成上拉输入模式 低电平时按下按钮
+PC8 KEY5 需要配置成上拉输入模式 低电平时按下按钮 用来检测工装压合，外置压合开关
+
+最小系统需要的电路
+
+3.3V 电源：满足 MCU、传感器、屏幕 3.3V 负载；每个 VDD 就近 0.1uF，电源入口放 4.7uF-10uF。
+VDDA/VSSA：VDDA 接 3.3V 模拟电源，建议磁珠/10Ω隔离，旁路 100nF + 1uF；VREF+ 接干净 3.3V 或外部基准，VREF- 接 AGND。
+HSE：8MHz 晶振 + 两个负载电容，供系统和 USB 时钟使用。
+LSE：如果要 RTC，再接 PC14/PC15 的 32.768k；不用 RTC 可以不接。
+NRST：10k 上拉到 3.3V，100nF 到 GND，预留复位按键。
+BOOT0：10k 下拉到 GND，预留跳帽/按键到 3.3V；PB2/BOOT1 建议默认下拉。
+SWD 下载口：3.3V、GND、PA13/SWDIO、PA14/SWCLK、NRST。
+USB：D+/D- 串阻、D+ 1.5k 上拉、ESD、VBUS 保护。
+I2C：14 路模拟 I2C 每路单独上拉；CTP 的硬件 I2C2 也单独上拉。
+ADC：输入限压到 0-3.3V，传感器可能超过范围时加分压、钳位、运放缓冲或保护电阻。
+这版管脚资源是够的，主要风险不在数量，而在 3 路软件 UART 的实时性 和 14 路软件 I2C 的固件调度。如果 UART 速率高或通信很密，建议把 3 路软件 UART 改成外扩 UART 芯片，会比后期调中断稳定很多。

@@ -1,0 +1,507 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.6 Chrome/144.0.7559.236 Electron/40.8.4 Safari/537.36" version="29.6.6">
+  <diagram name="第 1 页" id="eIWpa1wJiv5KGKKGZcOF">
+    <mxGraphModel dx="1069" dy="1028" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-2" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-3">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="70" y="270" />
+            </Array>
+            <mxPoint x="150" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="公司空压机气源" vertex="1">
+          <mxGeometry height="160" width="20" x="50" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-5" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=-0.142;entryDx=0;entryDy=0;entryPerimeter=0;" target="NzFF_vy4wPwDICQkqwAB-4" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="640" y="270" />
+            </Array>
+            <mxPoint x="290" y="270" as="sourcePoint" />
+            <mxPoint x="640.037037037037" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="车间气路通道" vertex="1">
+          <mxGeometry height="20" width="150" x="140" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-7" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-6" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="215" y="330" />
+              <mxPoint x="215" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-84" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-85" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-35">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="535" y="330" />
+              <mxPoint x="535" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-86" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0.568;exitY=0.912;exitDx=0;exitDy=0;exitPerimeter=0;" target="NzFF_vy4wPwDICQkqwAB-47">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="330" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机内部气路通道" vertex="1">
+          <mxGeometry height="20" width="1000" x="140" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-9" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-8" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀50mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="140" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-11" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-10" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀1" vertex="1">
+          <mxGeometry height="20" width="150" x="140" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-13" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="170" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-16" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="215" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="矫正气罐50L/50mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="155" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-14" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀21" vertex="1">
+          <mxGeometry height="40" width="50" x="150" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-18" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="215" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-17" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测1" vertex="1">
+          <mxGeometry height="60" width="120" x="155" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-20" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="215" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-19" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀2" vertex="1">
+          <mxGeometry height="60" width="120" x="155" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-91" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-90">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1230" y="830" />
+              <mxPoint x="1230" y="830" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-100" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-97">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1420" y="860" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-21" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机内部气路通道" vertex="1">
+          <mxGeometry height="60" width="2565" x="155" y="860" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-22" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-25" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-23" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀150mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="300" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-24" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-28" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-25" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀3" vertex="1">
+          <mxGeometry height="20" width="150" x="300" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-26" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-27" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="375" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-28" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="矫正气罐50L/150mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="315" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-29" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀22" vertex="1">
+          <mxGeometry height="40" width="50" x="310" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-30" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-31" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="375" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-31" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测2" vertex="1">
+          <mxGeometry height="60" width="120" x="315" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-32" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-33" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="375" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-33" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀4" vertex="1">
+          <mxGeometry height="60" width="120" x="315" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-34" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-37" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-35" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀250mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="460" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-36" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-37" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-40" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-37" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀5" vertex="1">
+          <mxGeometry height="20" width="150" x="460" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-38" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-40" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="490" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-39" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-40" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="535" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-40" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="矫正气罐50L/250mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="475" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-41" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀23" vertex="1">
+          <mxGeometry height="40" width="50" x="470" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-42" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-43" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="535" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-43" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测3" vertex="1">
+          <mxGeometry height="60" width="120" x="475" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-44" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-45" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="535" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-45" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀6" vertex="1">
+          <mxGeometry height="60" width="120" x="475" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-46" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-49" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-47" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀100mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="630" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-48" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-49" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-52" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-49" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀7" vertex="1">
+          <mxGeometry height="20" width="150" x="630" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-50" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-52" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="660" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-51" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-52" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="705" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-52" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="测试气罐50L/100mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="645" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-53" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀24" vertex="1">
+          <mxGeometry height="40" width="50" x="640" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-54" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-55" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="705" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-55" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测4" vertex="1">
+          <mxGeometry height="60" width="120" x="645" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-56" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-57" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="705" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-57" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀8" vertex="1">
+          <mxGeometry height="60" width="120" x="645" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-58" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-59" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-61" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-59" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀200mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="810" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-60" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-61" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-64" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-61" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀9" vertex="1">
+          <mxGeometry height="20" width="150" x="810" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-62" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-64" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="840" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-63" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-64" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="885" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-64" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="测试气罐50L/200mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="825" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-65" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀25" vertex="1">
+          <mxGeometry height="40" width="50" x="820" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-66" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-67" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="885" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-67" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测5" vertex="1">
+          <mxGeometry height="60" width="120" x="825" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-68" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-69" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="885" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-69" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀10" vertex="1">
+          <mxGeometry height="60" width="120" x="825" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-70" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-71" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-73" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-71" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="过滤减压阀300mmHg" vertex="1">
+          <mxGeometry height="20" width="150" x="990" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-72" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-73" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-76" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-73" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀11" vertex="1">
+          <mxGeometry height="20" width="150" x="990" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-74" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-76" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1020" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-75" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-76" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1065" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-76" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="测试气罐50L/300mmHg" vertex="1">
+          <mxGeometry height="60" width="120" x="1005" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-77" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀26" vertex="1">
+          <mxGeometry height="40" width="50" x="1000" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-78" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-79" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1065" y="730" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-79" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测6" vertex="1">
+          <mxGeometry height="60" width="120" x="1005" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-80" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-81" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1065" y="860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-81" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀12" vertex="1">
+          <mxGeometry height="60" width="120" x="1005" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-88" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-4" style="endArrow=classic;html=1;rounded=0;exitX=0.745;exitY=0.946;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitPerimeter=0;" target="NzFF_vy4wPwDICQkqwAB-59" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="670" y="440" as="sourcePoint" />
+            <mxPoint x="720" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-93" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-90" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-92" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-90" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀13" vertex="1">
+          <mxGeometry height="60" width="120" x="1170" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-123" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-92" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-122" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-92" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测7" vertex="1">
+          <mxGeometry height="60" width="120" x="1170" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-125" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-94" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-124" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-94" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测8" vertex="1">
+          <mxGeometry height="60" width="120" x="1350" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-127" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-95" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-126" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-95" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测9" vertex="1">
+          <mxGeometry height="60" width="120" x="1530" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-129" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-96" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-128" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-96" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测10" vertex="1">
+          <mxGeometry height="60" width="120" x="1710" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-111" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-97" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-94" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-97" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀14" vertex="1">
+          <mxGeometry height="60" width="120" x="1360" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-112" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-98" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-95" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-98" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀15" vertex="1">
+          <mxGeometry height="60" width="120" x="1530" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-113" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-99" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-96" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-99" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀16" vertex="1">
+          <mxGeometry height="60" width="120" x="1710" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-114" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-101" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-108" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-101" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀17" vertex="1">
+          <mxGeometry height="60" width="120" x="1890" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-115" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-102" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-109" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-102" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀18" vertex="1">
+          <mxGeometry height="60" width="120" x="2070" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-116" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-103" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-110" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-103" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀19" vertex="1">
+          <mxGeometry height="60" width="120" x="2251" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-104" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-98" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1580" y="860" as="sourcePoint" />
+            <mxPoint x="1630" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-105" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-99" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1760" y="860" as="sourcePoint" />
+            <mxPoint x="1810" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-106" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" target="NzFF_vy4wPwDICQkqwAB-101" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="1940" y="860" as="sourcePoint" />
+            <mxPoint x="1990" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-107" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;" target="NzFF_vy4wPwDICQkqwAB-102" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2120" y="860" as="sourcePoint" />
+            <mxPoint x="2170" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-131" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-108" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-130" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-108" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测11" vertex="1">
+          <mxGeometry height="60" width="120" x="1880" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-133" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-109" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-132" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-109" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测12" vertex="1">
+          <mxGeometry height="60" width="120" x="2068" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-135" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-110" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-134" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-110" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测13" vertex="1">
+          <mxGeometry height="60" width="120" x="2251" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-117" edge="1" parent="1" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="NzFF_vy4wPwDICQkqwAB-103" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2300" y="860" as="sourcePoint" />
+            <mxPoint x="2350" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-118" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-119" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-120" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-119" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="电磁阀20" vertex="1">
+          <mxGeometry height="60" width="120" x="2410" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-137" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-120" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="NzFF_vy4wPwDICQkqwAB-136" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-120" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="压力检测14" vertex="1">
+          <mxGeometry height="60" width="120" x="2410" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-121" edge="1" parent="1" source="NzFF_vy4wPwDICQkqwAB-21" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitX=0.904;exitY=-0.019;exitDx=0;exitDy=0;exitPerimeter=0;" target="NzFF_vy4wPwDICQkqwAB-119" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="2459" y="860" as="sourcePoint" />
+            <mxPoint x="2509" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-122" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道1" vertex="1">
+          <mxGeometry height="60" width="120" x="1170" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-124" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道2" vertex="1">
+          <mxGeometry height="60" width="120" x="1350" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-126" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道3" vertex="1">
+          <mxGeometry height="60" width="120" x="1530" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-128" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道4" vertex="1">
+          <mxGeometry height="60" width="120" x="1710" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-130" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道5" vertex="1">
+          <mxGeometry height="60" width="120" x="1880" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-132" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道6" vertex="1">
+          <mxGeometry height="60" width="120" x="2068" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-134" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道7" vertex="1">
+          <mxGeometry height="60" width="120" x="2251" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-136" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="标定机通道8" vertex="1">
+          <mxGeometry height="60" width="120" x="2410" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="NzFF_vy4wPwDICQkqwAB-138" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="主控板，带显示屏，SWM34SVE_LQFP100_14x14(八路软件串口)，CH32V307VCT6（八路硬件串口）" vertex="1">
+          <mxGeometry height="130" width="480" x="1580" y="280" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

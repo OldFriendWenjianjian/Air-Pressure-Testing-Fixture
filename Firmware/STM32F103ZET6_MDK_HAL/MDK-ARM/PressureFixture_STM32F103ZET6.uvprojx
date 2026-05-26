@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="project_projx.xsd">
+  <SchemaVersion>2.1</SchemaVersion>
+  <Header>### uVision Project, (C) Keil Software</Header>
+  <Targets>
+    <Target>
+      <TargetName>PressureFixture_STM32F103ZET6</TargetName>
+      <TargetOption>
+        <TargetCommonOption>
+          <Device>STM32F103ZE</Device>
+          <Vendor>STMicroelectronics</Vendor>
+          <Cpu>IRAM(0x20000000,0x10000) IROM(0x8000000,0x80000) CPUTYPE("Cortex-M3") CLOCK(72000000) ELITTLE</Cpu>
+          <OutputDirectory>.\Objects\</OutputDirectory>
+          <OutputName>PressureFixture_STM32F103ZET6</OutputName>
+          <CreateHexFile>1</CreateHexFile>
+        </TargetCommonOption>
+        <TargetArmAds>
+          <Cads>
+            <VariousControls>
+              <IncludePath>..\Core\Inc;..\App\Inc;..\BSP\Inc;..\USB_DEVICE\App;..\Drivers\CMSIS\Include;..\Drivers\CMSIS\Device\ST\STM32F1xx\Include;..\Drivers\STM32F1xx_HAL_Driver\Inc</IncludePath>
+            </VariousControls>
+          </Cads>
+        </TargetArmAds>
+      </TargetOption>
+      <Groups>
+        <Group>
+          <GroupName>Core</GroupName>
+          <Files>
+            <File><FileName>main.c</FileName><FileType>1</FileType><FilePath>..\Core\Src\main.c</FilePath></File>
+            <File><FileName>stm32f1xx_hal_msp.c</FileName><FileType>1</FileType><FilePath>..\Core\Src\stm32f1xx_hal_msp.c</FilePath></File>
+            <File><FileName>stm32f1xx_it.c</FileName><FileType>1</FileType><FilePath>..\Core\Src\stm32f1xx_it.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>App</GroupName>
+          <Files>
+            <File><FileName>app_keys.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_keys.c</FilePath></File>
+            <File><FileName>app_pcba_uart.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_pcba_uart.c</FilePath></File>
+            <File><FileName>app_power.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_power.c</FilePath></File>
+            <File><FileName>app_pressure.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_pressure.c</FilePath></File>
+            <File><FileName>app_protocol.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_protocol.c</FilePath></File>
+            <File><FileName>app_state_machine.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_state_machine.c</FilePath></File>
+            <File><FileName>app_valves.c</FileName><FileType>1</FileType><FilePath>..\App\Src\app_valves.c</FilePath></File>
+            <File><FileName>usb_msc_app.c</FileName><FileType>1</FileType><FilePath>..\App\Src\usb_msc_app.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP</GroupName>
+          <Files>
+            <File><FileName>board_pins.c</FileName><FileType>1</FileType><FilePath>..\BSP\Src\board_pins.c</FilePath></File>
+            <File><FileName>bsp_w25q128.c</FileName><FileType>1</FileType><FilePath>..\BSP\Src\bsp_w25q128.c</FilePath></File>
+            <File><FileName>lt768_basic.c</FileName><FileType>1</FileType><FilePath>..\BSP\Src\lt768_basic.c</FilePath></File>
+            <File><FileName>lt768_port.c</FileName><FileType>1</FileType><FilePath>..\BSP\Src\lt768_port.c</FilePath></File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>USB_DEVICE</GroupName>
+          <Files>
+            <File><FileName>storage_w25q_msc.c</FileName><FileType>1</FileType><FilePath>..\USB_DEVICE\App\storage_w25q_msc.c</FilePath></File>
+          </Files>
+        </Group>
+      </Groups>
+    </Target>
+  </Targets>
+</Project>

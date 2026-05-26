@@ -1,0 +1,66 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.6 Chrome/144.0.7559.236 Electron/40.8.4 Safari/537.36" version="29.6.6">
+  <diagram name="第 1 页" id="IeHUKy0szO1hq-4M-OSO">
+    <mxGraphModel dx="969" dy="676" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-3" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="初始化模式，罐体 压力闭环" vertex="1">
+          <mxGeometry height="60" width="120" x="300" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-5" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="自动气密性测试" vertex="1">
+          <mxGeometry height="60" width="120" x="500" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-7" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" value="">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="760" y="520" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="全管道气密性测试（可选启动）" vertex="1">
+          <mxGeometry height="60" width="120" x="700" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-10" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-9" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-8" parent="1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" value="Ready" vertex="1">
+          <mxGeometry height="80" width="80" x="720" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-12" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-11" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-9" parent="1" style="rhombus;whiteSpace=wrap;html=1;" value="PCBA气密性 测试" vertex="1">
+          <mxGeometry height="80" width="140" x="530" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-14" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-13" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-11" parent="1" style="whiteSpace=wrap;html=1;" value="50mmHg 150mmHg&amp;nbsp;250mmHg&amp;nbsp;标定" vertex="1">
+          <mxGeometry height="60" width="160" x="300" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-16" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-15" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-13" parent="1" style="whiteSpace=wrap;html=1;" value="100mmHg&amp;nbsp;200mmHg 300mmHg 测试" vertex="1">
+          <mxGeometry height="60" width="150" x="90" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-18" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="M7vz4AyP0a4CONF_YWyI-17" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-15" parent="1" style="whiteSpace=wrap;html=1;" value="校准完毕，蜂鸣器提示" vertex="1">
+          <mxGeometry height="60" width="120" x="105" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-19" edge="1" parent="1" source="M7vz4AyP0a4CONF_YWyI-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="M7vz4AyP0a4CONF_YWyI-8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="M7vz4AyP0a4CONF_YWyI-17" parent="1" style="whiteSpace=wrap;html=1;" value="补气阶段，实时显示补气状态" vertex="1">
+          <mxGeometry height="60" width="120" x="320" y="670" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
