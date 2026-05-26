@@ -165,13 +165,21 @@ int AppPcbaUart_Send(uint8_t channel, const uint8_t *data, uint16_t len)
     return send_soft_uart(channel, data, len);
 }
 
-int AppPcbaUart_SendCommandAll(uint8_t cmd)
+int AppPcbaUart_SendCommandAll(uint8_t cmd, PcbaFrame *responses, uint32_t timeout_ms)
 {
     uint8_t frame[PCBA_FRAME_MAX_SIZE];
+    PcbaFrame local_responses[APP_PCBA_CHANNEL_COUNT];
+
+    if (responses == 0) {
+        responses = local_responses;
+    }
 
     for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
         size_t len = PcbaProtocol_BuildNoData(cmd, ch, frame, sizeof(frame));
         if (len == 0u || AppPcbaUart_Send(ch, frame, (uint16_t)len) != 0) {
+            return -1;
+        }
+        if (receive_frame(ch, &responses[ch - 1u], timeout_ms) != 0) {
             return -1;
         }
     }
@@ -179,13 +187,52 @@ int AppPcbaUart_SendCommandAll(uint8_t cmd)
     return 0;
 }
 
-int AppPcbaUart_SendPressureAll(uint8_t cmd, uint32_t pressure_001mmhg)
+int AppPcbaUart_SendPressureAll(uint8_t cmd,
+                                uint32_t pressure_001mmhg,
+                                PcbaFrame *responses,
+                                uint32_t timeout_ms)
 {
     uint8_t frame[PCBA_FRAME_MAX_SIZE];
+    PcbaFrame local_responses[APP_PCBA_CHANNEL_COUNT];
+
+    if (responses == 0) {
+        responses = local_responses;
+    }
 
     for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
         size_t len = PcbaProtocol_BuildPressure(cmd, ch, pressure_001mmhg, frame, sizeof(frame));
         if (len == 0u || AppPcbaUart_Send(ch, frame, (uint16_t)len) != 0) {
+            return -1;
+        }
+        if (receive_frame(ch, &responses[ch - 1u], timeout_ms) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int AppPcbaUart_SendTestAll(uint32_t *pcba_pressure_001mmhg, uint32_t timeout_ms)
+{
+    uint8_t frame[PCBA_FRAME_MAX_SIZE];
+    PcbaFrame response;
+
+    if (pcba_pressure_001mmhg == 0) {
+        return -1;
+    }
+
+    for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
+        size_t len = PcbaProtocol_BuildNoData(PCBA_CMD_PRESSURE_TEST, ch, frame, sizeof(frame));
+        if (len == 0u || AppPcbaUart_Send(ch, frame, (uint16_t)len) != 0) {
+            return -1;
+        }
+        if (receive_frame(ch, &response, timeout_ms) != 0) {
+            return -1;
+        }
+        if (response.cmd != PCBA_CMD_PRESSURE_TEST || response.channel != ch) {
+            return -1;
+        }
+        if (!PcbaProtocol_GetU32Le(&response, &pcba_pressure_001mmhg[ch - 1u])) {
             return -1;
         }
     }
@@ -208,6 +255,36 @@ int AppPcbaUart_RequestAll(uint8_t cmd, PcbaFrame *responses, uint32_t timeout_m
             return -1;
         }
         if (receive_frame(ch, &responses[ch - 1u], timeout_ms) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int AppPcbaUart_CheckEmptyAckAll(const PcbaFrame *responses)
+{
+    if (responses == 0) {
+        return -1;
+    }
+
+    for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
+        if (!PcbaProtocol_IsEmptyAck(&responses[ch - 1u], ch)) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int AppPcbaUart_CheckOneByteAckAll(const PcbaFrame *responses, uint8_t expected)
+{
+    if (responses == 0) {
+        return -1;
+    }
+
+    for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
+        if (!PcbaProtocol_IsOneByteAck(&responses[ch - 1u], ch, expected)) {
             return -1;
         }
     }

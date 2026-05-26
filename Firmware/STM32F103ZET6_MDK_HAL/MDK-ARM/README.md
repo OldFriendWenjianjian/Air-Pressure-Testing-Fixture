@@ -1,13 +1,23 @@
-# Keil MDK 工程创建说明
+# Keil MDK 工程说明
 
-1. 新建 Keil MDK 工程，芯片选择 `STM32F103ZETx`。
-2. 加入 `Core/Src`、`App/Src`、`BSP/Src`、`USB_DEVICE/App` 下的 `.c` 文件。
-3. Include Path 加入：
-   - `../Core/Inc`
-   - `../App/Inc`
-   - `../BSP/Inc`
-   - `../USB_DEVICE/App`
-   - STM32CubeF1 HAL/CMSIS/USB Device 头文件目录
-4. 加入 STM32CubeF1 HAL 源文件，至少包括 RCC/GPIO/ADC/SPI/UART/CORTEX/FLASH/PCD。
-5. 加入启动文件 `startup_stm32f103xe.s`。
-6. 若启用 USB MSC，加入 ST USB Device Core、MSC Class，并让 `usbd_storage_if.c` 调用 `storage_w25q_msc.c` 中的接口。CubeMX/USB 中间件生成的 `MX_USB_DEVICE_Init()` 会被 `usb_msc_app.c` 调用。
+工程文件：`PressureFixture_STM32F103ZET6.uvprojx`
+
+当前工程使用 Keil MDK ARMCLANG，目标芯片为 `STM32F103ZE`。仓库内已包含最小 CMSIS/HAL 兼容层、启动文件和系统时钟文件，因此可以在未安装 STM32CubeF1 Pack 的机器上完成 MDK 编译。
+
+本地批量编译命令示例：
+
+```powershell
+& 'C:\Users\a1258\AppData\Local\Keil_v5\UV4\UV4.exe' -b '.\PressureFixture_STM32F103ZET6.uvprojx' -o '.\uv4-build.log'
+```
+
+成功时日志末尾应显示：
+
+```text
+".\Objects\PressureFixture_STM32F103ZET6.axf" - 0 Error(s), 0 Warning(s).
+```
+
+说明：
+
+1. `Drivers/STM32F1xx_HAL_Driver/Src/min_hal.c` 是为了让当前业务软件、协议状态机和 BSP 在 MDK 下可编译的最小兼容层。
+2. 后续进入真实硬件 bring-up 时，建议用 STM32CubeF1 官方 HAL 替换该最小兼容层，并补齐 USB Device Core/MSC Class。
+3. 目前 `usb_msc_app.c` 中的 `MX_USB_DEVICE_Init()` 是 weak stub；接入 CubeMX USB 设备库后，同名强符号会自动覆盖它。

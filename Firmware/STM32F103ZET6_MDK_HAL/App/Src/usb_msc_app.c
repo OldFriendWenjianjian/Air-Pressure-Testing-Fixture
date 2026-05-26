@@ -2,7 +2,7 @@
 #include "bsp_w25q128.h"
 
 #ifndef __WEAK
-#if defined(__CC_ARM) || defined(__ARMCC_VERSION)
+#if defined(__CC_ARM)
 #define __WEAK __weak
 #else
 #define __WEAK __attribute__((weak))

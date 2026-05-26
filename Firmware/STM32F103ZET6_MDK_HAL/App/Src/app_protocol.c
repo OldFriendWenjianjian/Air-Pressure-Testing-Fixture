@@ -81,6 +81,36 @@ size_t PcbaProtocol_BuildPressure(uint8_t cmd,
     return PcbaProtocol_Build(cmd, channel, data, sizeof(data), out, out_size);
 }
 
+bool PcbaProtocol_IsEmptyAck(const PcbaFrame *frame, uint8_t channel)
+{
+    return frame != 0 &&
+           frame->cmd == PCBA_CMD_ACK &&
+           frame->channel == channel &&
+           frame->len == 0u;
+}
+
+bool PcbaProtocol_IsOneByteAck(const PcbaFrame *frame, uint8_t channel, uint8_t expected)
+{
+    return frame != 0 &&
+           frame->cmd == PCBA_CMD_ACK &&
+           frame->channel == channel &&
+           frame->len == 1u &&
+           frame->data[0] == expected;
+}
+
+bool PcbaProtocol_GetU32Le(const PcbaFrame *frame, uint32_t *value)
+{
+    if (frame == 0 || value == 0 || frame->len < 4u) {
+        return false;
+    }
+
+    *value = ((uint32_t)frame->data[0]) |
+             ((uint32_t)frame->data[1] << 8) |
+             ((uint32_t)frame->data[2] << 16) |
+             ((uint32_t)frame->data[3] << 24);
+    return true;
+}
+
 bool PcbaProtocol_Parse(const uint8_t *bytes, size_t len, PcbaFrame *frame)
 {
     if (bytes == 0 || frame == 0 || len < 8u) {

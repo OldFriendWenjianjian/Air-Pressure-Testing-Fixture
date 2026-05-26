@@ -16,10 +16,14 @@ typedef enum {
     ST_AUTO_AIRTIGHTNESS,
     ST_READY,
     ST_PCBA_POWER_ON,
+    ST_PCBA_WAKE,
     ST_PCBA_SET_TEST_MODE,
+    ST_PCBA_SEND_POWER_ON,
+    ST_PCBA_WAIT_AFTER_POWER_ON,
     ST_PCBA_ZERO,
-    ST_LOW_POWER_PREPARE,
+    ST_SWITCH_45V,
     ST_LOW_POWER_QUERY,
+    ST_SWITCH_5V,
     ST_NORMAL_POWER_QUERY,
     ST_CAL_50,
     ST_CAL_150,
@@ -37,6 +41,7 @@ typedef struct {
     uint32_t entered_at;
     uint8_t step_sent;
     uint32_t airtight_start[APP_TANK_COUNT];
+    uint32_t pcba_test_pressure[APP_PCBA_CHANNEL_COUNT];
 } AppContext;
 
 static AppContext s_app;
@@ -134,7 +139,12 @@ static void pressure_cal_step(PressureSensorIndex sensor,
     }
     if (pressure_step_ready(sensor, target)) {
         uint32_t real_pressure = AppPressure_Get001mmHg(sensor);
-        if (AppPcbaUart_SendPressureAll(PCBA_CMD_SYNC_PRESSURE_CAL, real_pressure) == 0) {
+        PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+        if (AppPcbaUart_SendPressureAll(PCBA_CMD_SYNC_PRESSURE_CAL,
+                                        real_pressure,
+                                        responses,
+                                        APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+            AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
             enter_state(next);
         } else {
             enter_state(ST_ERROR);
@@ -154,8 +164,7 @@ static void pressure_test_step(PressureSensorIndex sensor,
         s_app.step_sent = 1u;
     }
     if (pressure_step_ready(sensor, target)) {
-        uint32_t real_pressure = AppPressure_Get001mmHg(sensor);
-        if (AppPcbaUart_SendPressureAll(PCBA_CMD_SYNC_PRESSURE_VERIFY, real_pressure) == 0) {
+        if (AppPcbaUart_SendTestAll(s_app.pcba_test_pressure, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0) {
             enter_state(next);
         } else {
             enter_state(ST_ERROR);
@@ -220,50 +229,95 @@ void AppStateMachine_Task(void)
         AppPower_Enable5V();
         if (elapsed(1000u)) {
             AppPower_Enable50mATestCircuit(1);
-            enter_state(ST_PCBA_SET_TEST_MODE);
+            enter_state(ST_PCBA_WAKE);
         }
         break;
+
+    case ST_PCBA_WAKE: {
+        PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+        if (AppPcbaUart_SendCommandAll(PCBA_CMD_WAKE_UP, responses, APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS) == 0 &&
+            AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+            enter_state(ST_PCBA_SET_TEST_MODE);
+        } else {
+            enter_state(ST_ERROR);
+        }
+        break;
+    }
 
     case ST_PCBA_SET_TEST_MODE:
-        if (AppPcbaUart_SendCommandAll(PCBA_CMD_SET_TEST_MODE) == 0) {
-            enter_state(ST_PCBA_ZERO);
-        } else {
-            enter_state(ST_ERROR);
-        }
-        break;
-
-    case ST_PCBA_ZERO:
-        AppValves_AllClosed();
-        if (AppPcbaUart_SendCommandAll(PCBA_CMD_RECORD_ZERO_AD) == 0) {
-            enter_state(ST_LOW_POWER_PREPARE);
-        } else {
-            enter_state(ST_ERROR);
-        }
-        break;
-
-    case ST_LOW_POWER_PREPARE:
-        if (AppPcbaUart_SendCommandAll(PCBA_CMD_SET_LOW_POWER_MODE) != 0) {
-            enter_state(ST_ERROR);
-            break;
-        }
-        AppPower_Enable45V();
-        enter_state(ST_LOW_POWER_QUERY);
-        break;
-
-    case ST_LOW_POWER_QUERY:
-        if (elapsed(1000u)) {
-            if (AppPcbaUart_RequestAll(PCBA_CMD_QUERY_LOW_POWER_STATE, 0, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0) {
-                AppPower_Enable5V();
-                enter_state(ST_NORMAL_POWER_QUERY);
+        {
+            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+            if (AppPcbaUart_SendCommandAll(PCBA_CMD_SET_TEST_MODE, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+                AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+                enter_state(ST_PCBA_SEND_POWER_ON);
             } else {
                 enter_state(ST_ERROR);
             }
         }
         break;
 
+    case ST_PCBA_SEND_POWER_ON:
+        {
+            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+            if (AppPcbaUart_SendCommandAll(PCBA_CMD_POWER_ON, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+                AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+                enter_state(ST_PCBA_WAIT_AFTER_POWER_ON);
+            } else {
+                enter_state(ST_ERROR);
+            }
+        }
+        break;
+
+    case ST_PCBA_WAIT_AFTER_POWER_ON:
+        if (elapsed(APP_PCBA_AFTER_POWER_ON_DELAY_MS)) {
+            enter_state(ST_PCBA_ZERO);
+        }
+        break;
+
+    case ST_PCBA_ZERO:
+        AppValves_AllClosed();
+        {
+            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+            if (AppPcbaUart_SendCommandAll(PCBA_CMD_RECORD_ZERO_AD, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+                AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+                enter_state(ST_SWITCH_45V);
+            } else {
+                enter_state(ST_ERROR);
+            }
+        }
+        break;
+
+    case ST_SWITCH_45V:
+        AppPower_Enable45V();
+        if (elapsed(APP_PCBA_POWER_SWITCH_DELAY_MS)) {
+            enter_state(ST_LOW_POWER_QUERY);
+        }
+        break;
+
+    case ST_LOW_POWER_QUERY:
+        {
+            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+            if (AppPcbaUart_RequestAll(PCBA_CMD_QUERY_LOW_POWER_STATE, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+                AppPcbaUart_CheckOneByteAckAll(responses, PCBA_ACK_YES) == 0) {
+                enter_state(ST_SWITCH_5V);
+            } else {
+                enter_state(ST_ERROR);
+            }
+        }
+        break;
+
+    case ST_SWITCH_5V:
+        AppPower_Enable5V();
+        if (elapsed(APP_PCBA_POWER_SWITCH_DELAY_MS)) {
+            enter_state(ST_NORMAL_POWER_QUERY);
+        }
+        break;
+
     case ST_NORMAL_POWER_QUERY:
-        if (elapsed(1000u)) {
-            if (AppPcbaUart_RequestAll(PCBA_CMD_QUERY_NORMAL_POWER, 0, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0) {
+        {
+            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+            if (AppPcbaUart_RequestAll(PCBA_CMD_QUERY_NORMAL_POWER, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
+                AppPcbaUart_CheckOneByteAckAll(responses, PCBA_ACK_YES) == 0) {
                 enter_state(ST_CAL_50);
             } else {
                 enter_state(ST_ERROR);
@@ -298,10 +352,6 @@ void AppStateMachine_Task(void)
     case ST_RESULT:
         AppValves_AllClosed();
         if (s_app.step_sent == 0u) {
-            if (AppPcbaUart_RequestAll(PCBA_CMD_QUERY_RESULT, 0, APP_PCBA_RESPONSE_TIMEOUT_MS) != 0) {
-                enter_state(ST_ERROR);
-                break;
-            }
             s_app.step_sent = 1u;
         }
         if (AppKeys_Key2Pressed() && elapsed(APP_RESULT_CONFIRM_KEY_DEBOUNCE_MS)) {
@@ -320,7 +370,6 @@ void AppStateMachine_Task(void)
     default:
         AppValves_AllClosed();
         AppPower_AllOff();
-        (void)AppPcbaUart_SendCommandAll(PCBA_CMD_ABORT);
         break;
     }
 }
