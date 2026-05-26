@@ -18,9 +18,8 @@ typedef enum {
     ST_PCBA_POWER_ON,
     ST_PCBA_STANDBY_CURRENT_CHECK,
     ST_PCBA_WAKE,
+    ST_PCBA_WORK_CURRENT_MEASURE,
     ST_PCBA_SET_TEST_MODE,
-    ST_PCBA_SEND_POWER_ON,
-    ST_PCBA_WAIT_AFTER_POWER_ON,
     ST_PCBA_ZERO,
     ST_SWITCH_45V,
     ST_LOW_POWER_QUERY,
@@ -85,6 +84,17 @@ static uint8_t standby_current_check_done(void)
      * table, but leave pass/fail evaluation for hardware bring-up.
      */
     return elapsed(APP_PCBA_STANDBY_CURRENT_CHECK_MS);
+}
+
+static uint8_t work_current_measure_done(void)
+{
+    /*
+     * PB1 only enables the 50mA work-current test circuit. The pin table does
+     * not define per-channel 50mA current measurement inputs yet, so this is
+     * the fixed sequence point where those readings should be latched when the
+     * hardware path is finalized.
+     */
+    return elapsed(APP_PCBA_WORK_CURRENT_MEASURE_MS);
 }
 
 static uint8_t all_tanks_ready(void)
@@ -258,40 +268,30 @@ void AppStateMachine_Task(void)
         if (AppPcbaUart_WakeAll(responses, APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS) == 0 &&
             AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
             AppPower_Enable50mATestCircuit(1);
-            enter_state(ST_PCBA_SET_TEST_MODE);
+            enter_state(ST_PCBA_WORK_CURRENT_MEASURE);
         } else {
             enter_state(ST_ERROR);
         }
         break;
     }
 
+    case ST_PCBA_WORK_CURRENT_MEASURE:
+        AppPower_Enable5V();
+        AppPower_Enable50mATestCircuit(1);
+        if (work_current_measure_done()) {
+            enter_state(ST_PCBA_SET_TEST_MODE);
+        }
+        break;
+
     case ST_PCBA_SET_TEST_MODE:
         {
             PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
             if (AppPcbaUart_SendCommandAll(PCBA_CMD_SET_TEST_MODE, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
                 AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
-                enter_state(ST_PCBA_SEND_POWER_ON);
+                enter_state(ST_PCBA_ZERO);
             } else {
                 enter_state(ST_ERROR);
             }
-        }
-        break;
-
-    case ST_PCBA_SEND_POWER_ON:
-        {
-            PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
-            if (AppPcbaUart_SendCommandAll(PCBA_CMD_POWER_ON, responses, APP_PCBA_RESPONSE_TIMEOUT_MS) == 0 &&
-                AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
-                enter_state(ST_PCBA_WAIT_AFTER_POWER_ON);
-            } else {
-                enter_state(ST_ERROR);
-            }
-        }
-        break;
-
-    case ST_PCBA_WAIT_AFTER_POWER_ON:
-        if (elapsed(APP_PCBA_AFTER_POWER_ON_DELAY_MS)) {
-            enter_state(ST_PCBA_ZERO);
         }
         break;
 
