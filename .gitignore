@@ -16,6 +16,7 @@ Listings/
 *.bak
 *.uvguix.*
 *.uvoptx
+!Firmware/STM32F103ZET6_MDK_HAL/MDK-ARM/PressureFixture_STM32F103ZET6.uvoptx
 
 # STM32Cube generated local/cache files
 .mxproject

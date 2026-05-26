@@ -19,7 +19,7 @@
           <Cpu>IRAM(0x20000000,0x10000) IROM(0x08000000,0x80000) CPUTYPE("Cortex-M3") CLOCK(72000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
           <StartupFile></StartupFile>
-          <FlashDriverDll></FlashDriverDll>
+          <FlashDriverDll>UL2CM3(-S0 -C0 -P0 -FD20000000 -FC1000 -FN1 -FF0STM32F10x_512 -FS08000000 -FL080000)</FlashDriverDll>
           <DeviceId></DeviceId>
           <RegisterFile></RegisterFile>
           <MemoryEnv></MemoryEnv>
@@ -44,7 +44,7 @@
             <ExitCodeStop>0</ExitCodeStop>
             <ButtonStop>0</ButtonStop>
             <NotGenerated>0</NotGenerated>
-            <InvalidFlash>1</InvalidFlash>
+            <InvalidFlash>0</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\Objects\</OutputDirectory>
           <OutputName>PressureFixture_STM32F103ZET6</OutputName>
@@ -107,14 +107,14 @@
           <ComprImg>1</ComprImg>
         </CommonProperty>
         <DllOption>
-          <SimDllName></SimDllName>
+          <SimDllName>SARMCM3.DLL</SimDllName>
           <SimDllArguments></SimDllArguments>
-          <SimDlgDll></SimDlgDll>
-          <SimDlgDllArguments></SimDlgDllArguments>
-          <TargetDllName></TargetDllName>
+          <SimDlgDll>DARMSTM.DLL</SimDlgDll>
+          <SimDlgDllArguments>-pSTM32F103ZE</SimDlgDllArguments>
+          <TargetDllName>SARMCM3.DLL</TargetDllName>
           <TargetDllArguments></TargetDllArguments>
-          <TargetDlgDll></TargetDlgDll>
-          <TargetDlgDllArguments></TargetDlgDllArguments>
+          <TargetDlgDll>TARMSTM.DLL</TargetDlgDll>
+          <TargetDlgDllArguments>-pSTM32F103ZE</TargetDlgDllArguments>
         </DllOption>
         <DebugOption>
           <OPTHX>
@@ -130,12 +130,12 @@
             <UseTargetDll>1</UseTargetDll>
             <UseExternalTool>0</UseExternalTool>
             <RunIndependent>0</RunIndependent>
-            <UpdateFlashBeforeDebugging>0</UpdateFlashBeforeDebugging>
-            <Capability>0</Capability>
-            <DriverSelection>-1</DriverSelection>
+            <UpdateFlashBeforeDebugging>1</UpdateFlashBeforeDebugging>
+            <Capability>1</Capability>
+            <DriverSelection>4096</DriverSelection>
           </Flash1>
           <bUseTDR>0</bUseTDR>
-          <Flash2></Flash2>
+          <Flash2>BIN\UL2CM3.DLL</Flash2>
           <Flash3></Flash3>
           <Flash4></Flash4>
           <pFcarmOut></pFcarmOut>
