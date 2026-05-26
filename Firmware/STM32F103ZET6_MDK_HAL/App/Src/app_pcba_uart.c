@@ -165,12 +165,19 @@ int AppPcbaUart_Send(uint8_t channel, const uint8_t *data, uint16_t len)
     return send_soft_uart(channel, data, len);
 }
 
-int AppPcbaUart_SendWakeByteAll(void)
+int AppPcbaUart_WakeAll(PcbaFrame *responses, uint32_t timeout_ms)
 {
     uint8_t wake = PCBA_WAKE_BYTE;
+    PcbaFrame local_responses[APP_PCBA_CHANNEL_COUNT];
 
+    if (responses == 0) {
+        responses = local_responses;
+    }
     for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
         if (AppPcbaUart_Send(ch, &wake, 1u) != 0) {
+            return -1;
+        }
+        if (receive_frame(ch, &responses[ch - 1u], timeout_ms) != 0) {
             return -1;
         }
     }

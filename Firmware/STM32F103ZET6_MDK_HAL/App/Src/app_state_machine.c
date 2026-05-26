@@ -16,6 +16,7 @@ typedef enum {
     ST_AUTO_AIRTIGHTNESS,
     ST_READY,
     ST_PCBA_POWER_ON,
+    ST_PCBA_STANDBY_CURRENT_CHECK,
     ST_PCBA_WAKE,
     ST_PCBA_SET_TEST_MODE,
     ST_PCBA_SEND_POWER_ON,
@@ -73,6 +74,17 @@ static void refill_tanks(void)
 
     AppValves_AllClosed();
     AppValves_OpenMask(inlet_valves, sizeof(inlet_valves));
+}
+
+static uint8_t standby_current_check_done(void)
+{
+    /*
+     * Pin assignment only exposes PB1 as the 50mA work-current test circuit
+     * enable. No eight-channel standby-current ADC inputs are defined yet.
+     * Keep the required timing slot here so the sequence matches the logic
+     * table, but leave pass/fail evaluation for hardware bring-up.
+     */
+    return elapsed(APP_PCBA_STANDBY_CURRENT_CHECK_MS);
 }
 
 static uint8_t all_tanks_ready(void)
@@ -228,21 +240,27 @@ void AppStateMachine_Task(void)
     case ST_PCBA_POWER_ON:
         AppPower_Enable5V();
         if (elapsed(1000u)) {
-            AppPower_Enable50mATestCircuit(1);
+            AppPower_Enable50mATestCircuit(0);
+            enter_state(ST_PCBA_STANDBY_CURRENT_CHECK);
+        }
+        break;
+
+    case ST_PCBA_STANDBY_CURRENT_CHECK:
+        AppPower_Enable5V();
+        AppPower_Enable50mATestCircuit(0);
+        if (standby_current_check_done()) {
             enter_state(ST_PCBA_WAKE);
         }
         break;
 
     case ST_PCBA_WAKE: {
-        if (s_app.step_sent == 0u) {
-            if (AppPcbaUart_SendWakeByteAll() != 0) {
-                enter_state(ST_ERROR);
-                break;
-            }
-            s_app.step_sent = 1u;
-        }
-        if (elapsed(APP_PCBA_WAKE_SETTLE_MS)) {
+        PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+        if (AppPcbaUart_WakeAll(responses, APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS) == 0 &&
+            AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+            AppPower_Enable50mATestCircuit(1);
             enter_state(ST_PCBA_SET_TEST_MODE);
+        } else {
+            enter_state(ST_ERROR);
         }
         break;
     }
