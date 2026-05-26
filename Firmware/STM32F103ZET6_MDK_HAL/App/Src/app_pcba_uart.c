@@ -165,6 +165,19 @@ int AppPcbaUart_Send(uint8_t channel, const uint8_t *data, uint16_t len)
     return send_soft_uart(channel, data, len);
 }
 
+int AppPcbaUart_SendWakeByteAll(void)
+{
+    uint8_t wake = PCBA_WAKE_BYTE;
+
+    for (uint8_t ch = 1u; ch <= APP_PCBA_CHANNEL_COUNT; ++ch) {
+        if (AppPcbaUart_Send(ch, &wake, 1u) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int AppPcbaUart_SendCommandAll(uint8_t cmd, PcbaFrame *responses, uint32_t timeout_ms)
 {
     uint8_t frame[PCBA_FRAME_MAX_SIZE];

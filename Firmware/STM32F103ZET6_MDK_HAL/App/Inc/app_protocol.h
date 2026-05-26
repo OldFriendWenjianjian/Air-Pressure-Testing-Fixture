@@ -9,9 +9,9 @@
 #define PCBA_FRAME_HEAD1                    0xAAu
 #define PCBA_FRAME_MAX_DATA                 16u
 #define PCBA_FRAME_MAX_SIZE                 (2u + 1u + 1u + 2u + PCBA_FRAME_MAX_DATA + 2u)
+#define PCBA_WAKE_BYTE                      0x00u
 
 typedef enum {
-    PCBA_CMD_WAKE_UP                = 0x00u,
     PCBA_CMD_SET_TEST_MODE          = 0x01u,
     PCBA_CMD_RECORD_ZERO_AD         = 0x02u,
     PCBA_CMD_POWER_ON               = 0x03u,

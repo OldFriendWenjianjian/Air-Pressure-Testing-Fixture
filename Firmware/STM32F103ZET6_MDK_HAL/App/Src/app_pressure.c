@@ -61,7 +61,7 @@ uint32_t AppPressure_Get001mmHg(PressureSensorIndex index)
     uint16_t raw = AppPressure_GetRaw(index);
 
     /* Placeholder linear mapping. Calibrate offset/span in hardware bring-up. */
-    return ((uint32_t)raw * 300u * APP_PRESSURE_SCALE_PER_MMHG) / 4095u;
+    return ((uint32_t)raw * 285u * APP_PRESSURE_SCALE_PER_MMHG) / 4095u;
 }
 
 int AppPressure_IsStable(PressureSensorIndex index, uint32_t target_001mmhg)

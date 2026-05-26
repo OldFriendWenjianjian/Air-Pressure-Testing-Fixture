@@ -30,7 +30,7 @@ typedef enum {
     ST_CAL_250,
     ST_TEST_100,
     ST_TEST_200,
-    ST_TEST_300,
+    ST_TEST_285,
     ST_RESULT,
     ST_REFILL,
     ST_ERROR
@@ -82,7 +82,7 @@ static uint8_t all_tanks_ready(void)
            AppPressure_IsStable(PRESSURE_SENSOR_TANK_250, APP_PRESSURE_250_MMHG) &&
            AppPressure_IsStable(PRESSURE_SENSOR_TANK_100, APP_PRESSURE_100_MMHG) &&
            AppPressure_IsStable(PRESSURE_SENSOR_TANK_200, APP_PRESSURE_200_MMHG) &&
-           AppPressure_IsStable(PRESSURE_SENSOR_TANK_300, APP_PRESSURE_300_MMHG);
+           AppPressure_IsStable(PRESSURE_SENSOR_TANK_285, APP_PRESSURE_285_MMHG);
 }
 
 static uint8_t pressure_step_ready(PressureSensorIndex sensor, uint32_t target)
@@ -103,7 +103,7 @@ static void capture_airtight_start(void)
     s_app.airtight_start[2] = AppPressure_Get001mmHg(PRESSURE_SENSOR_TANK_250);
     s_app.airtight_start[3] = AppPressure_Get001mmHg(PRESSURE_SENSOR_TANK_100);
     s_app.airtight_start[4] = AppPressure_Get001mmHg(PRESSURE_SENSOR_TANK_200);
-    s_app.airtight_start[5] = AppPressure_Get001mmHg(PRESSURE_SENSOR_TANK_300);
+    s_app.airtight_start[5] = AppPressure_Get001mmHg(PRESSURE_SENSOR_TANK_285);
 }
 
 static uint8_t airtight_drop_ok(void)
@@ -114,7 +114,7 @@ static uint8_t airtight_drop_ok(void)
         PRESSURE_SENSOR_TANK_250,
         PRESSURE_SENSOR_TANK_100,
         PRESSURE_SENSOR_TANK_200,
-        PRESSURE_SENSOR_TANK_300
+        PRESSURE_SENSOR_TANK_285
     };
 
     for (uint8_t i = 0u; i < APP_TANK_COUNT; ++i) {
@@ -234,12 +234,15 @@ void AppStateMachine_Task(void)
         break;
 
     case ST_PCBA_WAKE: {
-        PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
-        if (AppPcbaUart_SendCommandAll(PCBA_CMD_WAKE_UP, responses, APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS) == 0 &&
-            AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
+        if (s_app.step_sent == 0u) {
+            if (AppPcbaUart_SendWakeByteAll() != 0) {
+                enter_state(ST_ERROR);
+                break;
+            }
+            s_app.step_sent = 1u;
+        }
+        if (elapsed(APP_PCBA_WAKE_SETTLE_MS)) {
             enter_state(ST_PCBA_SET_TEST_MODE);
-        } else {
-            enter_state(ST_ERROR);
         }
         break;
     }
@@ -342,11 +345,11 @@ void AppStateMachine_Task(void)
         break;
 
     case ST_TEST_200:
-        pressure_test_step(PRESSURE_SENSOR_TANK_200, APP_PRESSURE_200_MMHG, 10u, ST_TEST_300);
+        pressure_test_step(PRESSURE_SENSOR_TANK_200, APP_PRESSURE_200_MMHG, 10u, ST_TEST_285);
         break;
 
-    case ST_TEST_300:
-        pressure_test_step(PRESSURE_SENSOR_TANK_300, APP_PRESSURE_300_MMHG, 12u, ST_RESULT);
+    case ST_TEST_285:
+        pressure_test_step(PRESSURE_SENSOR_TANK_285, APP_PRESSURE_285_MMHG, 12u, ST_RESULT);
         break;
 
     case ST_RESULT:
