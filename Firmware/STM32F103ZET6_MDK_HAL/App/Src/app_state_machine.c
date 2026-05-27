@@ -265,9 +265,10 @@ void AppStateMachine_Task(void)
 
     case ST_PCBA_WAKE: {
         PcbaFrame responses[APP_PCBA_CHANNEL_COUNT];
+        AppPower_Enable5V();
+        AppPower_Enable50mATestCircuit(1);
         if (AppPcbaUart_WakeAll(responses, APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS) == 0 &&
             AppPcbaUart_CheckEmptyAckAll(responses) == 0) {
-            AppPower_Enable50mATestCircuit(1);
             enter_state(ST_PCBA_WORK_CURRENT_MEASURE);
         } else {
             enter_state(ST_ERROR);
