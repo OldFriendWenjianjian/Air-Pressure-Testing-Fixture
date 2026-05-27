@@ -1,5 +1,6 @@
 #include "app_state_machine.h"
 #include "app_config.h"
+#include "app_current.h"
 #include "app_keys.h"
 #include "app_pcba_uart.h"
 #include "app_power.h"
@@ -77,24 +78,16 @@ static void refill_tanks(void)
 
 static uint8_t standby_current_check_done(void)
 {
-    /*
-     * Pin assignment only exposes PB1 as the 50mA work-current test circuit
-     * enable. No eight-channel standby-current ADC inputs are defined yet.
-     * Keep the required timing slot here so the sequence matches the logic
-     * table, but leave pass/fail evaluation for hardware bring-up.
-     */
-    return elapsed(APP_PCBA_STANDBY_CURRENT_CHECK_MS);
+    return elapsed(APP_PCBA_STANDBY_CURRENT_CHECK_MS) &&
+           AppCurrent_CaptureAll(APP_CURRENT_MODE_STANDBY) == 0 &&
+           AppCurrent_StandbyAllInRange();
 }
 
 static uint8_t work_current_measure_done(void)
 {
-    /*
-     * PB1 only enables the 50mA work-current test circuit. The pin table does
-     * not define per-channel 50mA current measurement inputs yet, so this is
-     * the fixed sequence point where those readings should be latched when the
-     * hardware path is finalized.
-     */
-    return elapsed(APP_PCBA_WORK_CURRENT_MEASURE_MS);
+    return elapsed(APP_PCBA_WORK_CURRENT_MEASURE_MS) &&
+           AppCurrent_CaptureAll(APP_CURRENT_MODE_WORK) == 0 &&
+           AppCurrent_WorkAllInRange();
 }
 
 static uint8_t all_tanks_ready(void)
@@ -200,6 +193,7 @@ void AppStateMachine_Init(AppBootMode mode)
 {
     AppPower_AllOff();
     AppValves_AllClosed();
+    AppCurrent_Init();
     AppPressure_Init();
     AppPcbaUart_Init();
 

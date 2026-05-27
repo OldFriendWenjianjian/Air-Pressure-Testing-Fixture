@@ -17,25 +17,12 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc)
 
     __HAL_RCC_ADC1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
 
     gpio.Mode = GPIO_MODE_ANALOG;
     gpio.Pull = GPIO_NOPULL;
     gpio.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 |
                GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7;
     HAL_GPIO_Init(GPIOA, &gpio);
-
-    gpio.Pin = GPIO_PIN_0;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
-    /*
-     * PB1 and PC3/PC4/PC5 are reserved by the current pin assignment for
-     * 50mA enable and keys. Do not configure them as ADC until hardware is
-     * finalized.
-     */
-    gpio.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2;
-    HAL_GPIO_Init(GPIOC, &gpio);
 }
 
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)

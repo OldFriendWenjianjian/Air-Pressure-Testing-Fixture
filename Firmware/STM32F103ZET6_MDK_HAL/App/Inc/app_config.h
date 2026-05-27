@@ -30,6 +30,14 @@
 #define APP_STAGE_SETTLE_TIMEOUT_MS         30000u
 #define APP_RESULT_CONFIRM_KEY_DEBOUNCE_MS  50u
 
+#define APP_CURRENT_ADC_VREF_MV             3300u
+#define APP_PCBA_CURRENT_AMP_GAIN           100u
+#define APP_PCBA_STANDBY_SHUNT_MOHM         1000000u
+#define APP_PCBA_WORK_SHUNT_MOHM            200u
+#define APP_PCBA_STANDBY_CURRENT_MAX_UA     0u
+#define APP_PCBA_WORK_CURRENT_MIN_UA        0u
+#define APP_PCBA_WORK_CURRENT_MAX_UA        0u
+
 #define W25Q128_TOTAL_BYTES                 (16u * 1024u * 1024u)
 #define W25Q128_SECTOR_BYTES                4096u
 #define W25Q128_PAGE_BYTES                  256u

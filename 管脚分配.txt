@@ -17,9 +17,8 @@ SWD 调试：保留 PA13/PA14。
 16 路 ADC
 
 功能	MCU 管脚
-AD1-AD8	PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7
-AD9-AD10	PB0, PB1
-AD11-AD16	PC0, PC1, PC2, PC3, PC4, PC5
+AD1-AD8	PA0, PA1, PA2, PA3, PA4, PA5, PA6, PA7（八路ADC PCBA工作电流采集，开启IO_50mA_test_circuit_ENABLE时，此八路采集到0.2R电流采样电阻的值（运放放大100倍）；未开启IO_50mA_test_circuit_ENABLE时，此八路采集到1kR电流采样电阻的值（运放放大100倍））
+
 注意：这些脚不要接 5V。每路建议预留 RC 滤波，例如 100Ω-1k 串阻 + 1nF-100nF 到 AGND，具体看采样速度和信号源阻抗。
 
 8 路 UART
@@ -73,21 +72,21 @@ GND	GND
 14 路独立模拟 I2C
 每一路都要单独上拉，建议 4.7k-10k 到对应电压，软件模拟开漏：输出低为 0，释放为输入/高阻。
 
-I2C 路数	SCL	SDA
-I2C_SIM1	PF0	PF1
-I2C_SIM2	PF2	PF3
-I2C_SIM3	PF4	PF5
-I2C_SIM4	PF6	PF7
-I2C_SIM5	PF8	PF9
-I2C_SIM6	PF10	PF11
-I2C_SIM7	PF12	PF13
-I2C_SIM8	PF14	PF15
-I2C_SIM9	PG5	PG6
-I2C_SIM10	PG7	PG8
-I2C_SIM11	PG9	PG10
-I2C_SIM12	PG11	PG12
-I2C_SIM13	PG13	PG14
-I2C_SIM14	PE6	PE7
+I2C 路数	SCL	SDA                            对应压力检测
+I2C_SIM1	PF0	PF1                             压力检测1
+I2C_SIM2	PF2	PF3                             压力检测2
+I2C_SIM3	PF4	PF5                             压力检测3
+I2C_SIM4	PF6	PF7                             压力检测4
+I2C_SIM5	PF8	PF9                             压力检测5
+I2C_SIM6	PF10	PF11                           压力检测6
+I2C_SIM7	PF12	PF13                           压力检测7
+I2C_SIM8	PF14	PF15                           压力检测8
+I2C_SIM9	PG5	PG6                            压力检测9
+I2C_SIM10	PG7	PG8                    压力检测10
+I2C_SIM11	PG9	PG10                  压力检测11
+I2C_SIM12	PG11	PG12          压力检测12
+I2C_SIM13	PG13	PG14          压力检测13
+I2C_SIM14	PE6	PE7                     压力检测14
 30 路普通 IO，26+4
 
 IO 范围	MCU 管脚

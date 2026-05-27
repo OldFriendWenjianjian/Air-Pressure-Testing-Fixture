@@ -29,10 +29,9 @@ void AppPressure_Task(void)
 
     for (uint8_t i = 0; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
         /*
-         * Hardware note:
-         * current pin assignment conflicts PB1 with 50mA enable and PC3 with
-         * KEY1. Readings mapped to those ADC channels are placeholders until
-         * the final schematic resolves the conflict.
+         * Placeholder only. PA0-PA7 are now assigned to the eight PCBA current
+         * sense channels, and the real pressure sensors should be read through
+         * the independent simulated I2C buses.
          */
         channel.Channel = s_adc_channels[i];
         if (HAL_ADC_ConfigChannel(&hadc1, &channel) != HAL_OK) {
