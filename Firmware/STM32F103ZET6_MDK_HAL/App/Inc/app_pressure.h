@@ -22,8 +22,9 @@ typedef enum {
 
 void AppPressure_Init(void);
 void AppPressure_Task(void);
-uint16_t AppPressure_GetRaw(PressureSensorIndex index);
+uint32_t AppPressure_GetRaw(PressureSensorIndex index);
 uint32_t AppPressure_Get001mmHg(PressureSensorIndex index);
+int AppPressure_IsValid(PressureSensorIndex index);
 int AppPressure_IsStable(PressureSensorIndex index, uint32_t target_001mmhg);
 int AppPressure_AllChannelOutputsNear(uint32_t target_001mmhg);
 

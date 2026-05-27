@@ -149,6 +149,8 @@ void HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *init)
             cfg = 0xAU;
         } else if (init->Mode == GPIO_MODE_ANALOG) {
             cfg = 0x0U;
+        } else if (init->Mode == GPIO_MODE_INPUT && init->Pull == GPIO_NOPULL) {
+            cfg = 0x4U;
         } else if (init->Mode == GPIO_MODE_INPUT && init->Pull == GPIO_PULLUP) {
             cfg = 0x8U;
             port->BSRR = pin;
