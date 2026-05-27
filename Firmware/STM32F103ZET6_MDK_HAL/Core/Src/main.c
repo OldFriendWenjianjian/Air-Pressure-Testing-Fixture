@@ -1,5 +1,6 @@
 #include "main.h"
 #include "app_config.h"
+#include "app_display.h"
 #include "app_keys.h"
 #include "app_state_machine.h"
 #include "board_pins.h"
@@ -51,9 +52,11 @@ int main(void)
     }
 
     AppStateMachine_Init(boot_mode);
+    AppDisplay_Init(boot_mode);
 
     while (1) {
         AppStateMachine_Task();
+        AppDisplay_Task();
         HAL_Delay(5u);
     }
 }

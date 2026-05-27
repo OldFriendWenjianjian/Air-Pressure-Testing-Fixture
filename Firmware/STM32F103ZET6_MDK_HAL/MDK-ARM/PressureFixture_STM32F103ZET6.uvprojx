@@ -44,7 +44,7 @@
             <ExitCodeStop>0</ExitCodeStop>
             <ButtonStop>0</ButtonStop>
             <NotGenerated>0</NotGenerated>
-            <InvalidFlash>0</InvalidFlash>
+            <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\Objects\</OutputDirectory>
           <OutputName>PressureFixture_STM32F103ZET6</OutputName>
@@ -416,6 +416,11 @@
               <FileName>app_keys.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_keys.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_display.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_display.c</FilePath>
             </File>
             <File>
               <FileName>app_current.c</FileName>
