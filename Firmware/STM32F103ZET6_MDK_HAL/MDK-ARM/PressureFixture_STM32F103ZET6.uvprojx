@@ -448,6 +448,11 @@
               <FilePath>..\App\Src\app_protocol.c</FilePath>
             </File>
             <File>
+              <FileName>app_usb_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_usb_control.c</FilePath>
+            </File>
+            <File>
               <FileName>app_state_machine.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_state_machine.c</FilePath>

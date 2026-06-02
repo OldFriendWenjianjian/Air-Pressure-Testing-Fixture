@@ -1,0 +1,685 @@
+#include "app_usb_control.h"
+#include "app_config.h"
+#include "app_pressure.h"
+#include "app_valves.h"
+#include "main.h"
+
+typedef struct {
+    uint8_t boot_mode;
+    uint8_t rx_buf[USB_CTRL_MAX_FRAME_SIZE * 2u];
+    uint16_t rx_len;
+    uint16_t report_sequence;
+    uint32_t last_report_ms;
+    uint8_t last_error;
+} AppUsbControlContext;
+
+static AppUsbControlContext s_usb_ctrl;
+
+static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *snapshot);
+static void send_ack(uint16_t sequence, uint8_t accepted_command, uint8_t status_code);
+static void send_nak(uint16_t sequence, uint8_t rejected_command, uint8_t error_code);
+static void send_status(uint8_t frame_type, uint16_t sequence);
+static void handle_frame(const UsbCtrlFrame *frame);
+
+static void put_u16_le(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+static void put_u32_le(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static uint16_t get_u16_le(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t get_u32_le(const uint8_t *p)
+{
+    return ((uint32_t)p[0]) |
+           ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static int32_t get_i32_le(const uint8_t *p)
+{
+    return (int32_t)get_u32_le(p);
+}
+
+uint16_t UsbCtrl_Crc16Modbus(const uint8_t *data, size_t len)
+{
+    uint16_t crc = 0xFFFFu;
+
+    if (data == 0 && len > 0u) {
+        return 0u;
+    }
+
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8u; ++bit) {
+            if ((crc & 0x0001u) != 0u) {
+                crc = (uint16_t)((crc >> 1) ^ 0xA001u);
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+
+    return crc;
+}
+
+size_t UsbCtrl_BuildFrame(uint8_t type,
+                          uint16_t sequence,
+                          uint8_t command,
+                          const uint8_t *payload,
+                          uint16_t payload_len,
+                          uint8_t *out,
+                          size_t out_size)
+{
+    size_t frame_len = USB_CTRL_MIN_FRAME_SIZE + payload_len;
+
+    if (out == 0 || payload_len > USB_CTRL_MAX_PAYLOAD || frame_len > out_size) {
+        return 0u;
+    }
+    if (payload_len > 0u && payload == 0) {
+        return 0u;
+    }
+
+    out[0] = USB_CTRL_FRAME_HEAD0;
+    out[1] = USB_CTRL_FRAME_HEAD1;
+    out[2] = USB_CTRL_PROTOCOL_VERSION;
+    out[3] = type;
+    put_u16_le(&out[4], sequence);
+    out[6] = command;
+    put_u16_le(&out[7], payload_len);
+
+    for (uint16_t i = 0; i < payload_len; ++i) {
+        out[9u + i] = payload[i];
+    }
+
+    uint16_t crc = UsbCtrl_Crc16Modbus(&out[2], (size_t)(7u + payload_len));
+    put_u16_le(&out[9u + payload_len], crc);
+
+    return frame_len;
+}
+
+size_t UsbCtrl_BuildAck(uint16_t sequence,
+                        uint8_t accepted_command,
+                        uint8_t status_code,
+                        uint8_t *out,
+                        size_t out_size)
+{
+    uint8_t payload[2];
+
+    payload[0] = accepted_command;
+    payload[1] = status_code;
+    return UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
+                              sequence,
+                              USB_CTRL_CMD_ACK,
+                              payload,
+                              sizeof(payload),
+                              out,
+                              out_size);
+}
+
+size_t UsbCtrl_BuildNak(uint16_t sequence,
+                        uint8_t rejected_command,
+                        uint8_t error_code,
+                        uint8_t *out,
+                        size_t out_size)
+{
+    uint8_t payload[2];
+
+    payload[0] = rejected_command;
+    payload[1] = error_code;
+    return UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
+                              sequence,
+                              USB_CTRL_CMD_NAK,
+                              payload,
+                              sizeof(payload),
+                              out,
+                              out_size);
+}
+
+size_t UsbCtrl_BuildStatusSnapshot(uint16_t sequence,
+                                   const UsbCtrlStatusSnapshot *snapshot,
+                                   uint8_t *out,
+                                   size_t out_size)
+{
+    uint8_t payload[USB_CTRL_STATUS_SNAPSHOT_LEN];
+    uint16_t payload_len = 0u;
+
+    if (!UsbCtrl_PackStatusSnapshot(snapshot, payload, &payload_len)) {
+        return 0u;
+    }
+
+    return UsbCtrl_BuildFrame(USB_CTRL_FRAME_REPORT,
+                              sequence,
+                              USB_CTRL_CMD_STATUS_SNAPSHOT,
+                              payload,
+                              payload_len,
+                              out,
+                              out_size);
+}
+
+UsbCtrlParseResult UsbCtrl_ParseFrame(const uint8_t *bytes,
+                                      size_t len,
+                                      UsbCtrlFrame *frame,
+                                      size_t *consumed)
+{
+    uint16_t payload_len;
+    size_t expected_len;
+    uint16_t rx_crc;
+    uint16_t calc_crc;
+
+    if (consumed != 0) {
+        *consumed = 0u;
+    }
+    if (bytes == 0 || frame == 0) {
+        return USB_CTRL_PARSE_BAD_ARG;
+    }
+    if (len < 2u) {
+        return USB_CTRL_PARSE_NEED_MORE;
+    }
+    if (bytes[0] != USB_CTRL_FRAME_HEAD0 || bytes[1] != USB_CTRL_FRAME_HEAD1) {
+        if (consumed != 0) {
+            *consumed = 1u;
+        }
+        return USB_CTRL_PARSE_BAD_HEAD;
+    }
+    if (len < USB_CTRL_MIN_FRAME_SIZE) {
+        return USB_CTRL_PARSE_NEED_MORE;
+    }
+    if (bytes[2] != USB_CTRL_PROTOCOL_VERSION) {
+        if (consumed != 0) {
+            *consumed = USB_CTRL_MIN_FRAME_SIZE;
+        }
+        return USB_CTRL_PARSE_BAD_VERSION;
+    }
+
+    payload_len = get_u16_le(&bytes[7]);
+    expected_len = USB_CTRL_MIN_FRAME_SIZE + payload_len;
+    if (payload_len > USB_CTRL_MAX_PAYLOAD) {
+        if (consumed != 0) {
+            *consumed = USB_CTRL_MIN_FRAME_SIZE;
+        }
+        return USB_CTRL_PARSE_BAD_LENGTH;
+    }
+    if (len < expected_len) {
+        return USB_CTRL_PARSE_NEED_MORE;
+    }
+
+    rx_crc = get_u16_le(&bytes[9u + payload_len]);
+    calc_crc = UsbCtrl_Crc16Modbus(&bytes[2], (size_t)(7u + payload_len));
+    if (rx_crc != calc_crc) {
+        if (consumed != 0) {
+            *consumed = expected_len;
+        }
+        return USB_CTRL_PARSE_BAD_CRC;
+    }
+
+    frame->version = bytes[2];
+    frame->type = bytes[3];
+    frame->sequence = get_u16_le(&bytes[4]);
+    frame->command = bytes[6];
+    frame->length = payload_len;
+    for (uint16_t i = 0; i < payload_len; ++i) {
+        frame->payload[i] = bytes[9u + i];
+    }
+
+    if (consumed != 0) {
+        *consumed = expected_len;
+    }
+    return USB_CTRL_PARSE_OK;
+}
+
+bool UsbCtrl_PackStatusSnapshot(const UsbCtrlStatusSnapshot *snapshot,
+                                uint8_t *payload,
+                                uint16_t *payload_len)
+{
+    if (snapshot == 0 || payload == 0 || payload_len == 0) {
+        return false;
+    }
+
+    put_u32_le(&payload[0], snapshot->uptime_ms);
+    payload[4] = snapshot->boot_mode;
+    payload[5] = snapshot->runtime_state;
+    payload[6] = snapshot->workflow_flags;
+    payload[7] = snapshot->error_code;
+    put_u16_le(&payload[8], snapshot->target_hold_pressure_mmhg);
+    put_u16_le(&payload[10], snapshot->pressure_tolerance_001mmhg);
+    put_u32_le(&payload[12], snapshot->valve_open_mask);
+    put_u32_le(&payload[16], snapshot->elapsed_in_state_ms);
+    put_u16_le(&payload[20], snapshot->snapshot_counter);
+    put_u16_le(&payload[22], snapshot->pcba_online_mask);
+    put_u16_le(&payload[24], snapshot->pcba_low_power_ok_mask);
+    put_u16_le(&payload[26], snapshot->pcba_normal_power_ok_mask);
+    put_u16_le(&payload[28], snapshot->pcba_pass_mask);
+
+    for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        put_u32_le(&payload[30u + ((uint16_t)i * 4u)], snapshot->pressure_001mmhg[i]);
+    }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        put_u32_le(&payload[86u + ((uint16_t)i * 4u)], snapshot->pcba_pressure_001mmhg[i]);
+    }
+
+    *payload_len = USB_CTRL_STATUS_SNAPSHOT_LEN;
+    return true;
+}
+
+bool UsbCtrl_UnpackStatusSnapshot(const uint8_t *payload,
+                                  uint16_t payload_len,
+                                  UsbCtrlStatusSnapshot *snapshot)
+{
+    if (payload == 0 || snapshot == 0 || payload_len != USB_CTRL_STATUS_SNAPSHOT_LEN) {
+        return false;
+    }
+
+    snapshot->uptime_ms = get_u32_le(&payload[0]);
+    snapshot->boot_mode = payload[4];
+    snapshot->runtime_state = payload[5];
+    snapshot->workflow_flags = payload[6];
+    snapshot->error_code = payload[7];
+    snapshot->target_hold_pressure_mmhg = get_u16_le(&payload[8]);
+    snapshot->pressure_tolerance_001mmhg = get_u16_le(&payload[10]);
+    snapshot->valve_open_mask = get_u32_le(&payload[12]);
+    snapshot->elapsed_in_state_ms = get_u32_le(&payload[16]);
+    snapshot->snapshot_counter = get_u16_le(&payload[20]);
+    snapshot->pcba_online_mask = get_u16_le(&payload[22]);
+    snapshot->pcba_low_power_ok_mask = get_u16_le(&payload[24]);
+    snapshot->pcba_normal_power_ok_mask = get_u16_le(&payload[26]);
+    snapshot->pcba_pass_mask = get_u16_le(&payload[28]);
+
+    for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        snapshot->pressure_001mmhg[i] = get_u32_le(&payload[30u + ((uint16_t)i * 4u)]);
+    }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        snapshot->pcba_pressure_001mmhg[i] = get_u32_le(&payload[86u + ((uint16_t)i * 4u)]);
+    }
+
+    return true;
+}
+
+void AppUsbControl_Init(AppBootMode boot_mode)
+{
+    s_usb_ctrl.boot_mode = boot_mode == APP_MODE_USB_MSC ?
+                           USB_CTRL_BOOT_USB_MSC :
+                           USB_CTRL_BOOT_NORMAL_CDC;
+    s_usb_ctrl.rx_len = 0u;
+    s_usb_ctrl.report_sequence = 1u;
+    s_usb_ctrl.last_report_ms = 0u;
+    s_usb_ctrl.last_error = USB_CTRL_ERROR_OK;
+
+    if (boot_mode == APP_MODE_NORMAL) {
+        (void)UsbCdcControl_Start();
+    }
+}
+
+void AppUsbControl_OnRxBytes(const uint8_t *data, uint16_t len)
+{
+    if (data == 0 || len == 0u) {
+        return;
+    }
+
+    for (uint16_t i = 0u; i < len; ++i) {
+        if (s_usb_ctrl.rx_len >= sizeof(s_usb_ctrl.rx_buf)) {
+            s_usb_ctrl.rx_len = 0u;
+        }
+        s_usb_ctrl.rx_buf[s_usb_ctrl.rx_len++] = data[i];
+    }
+}
+
+void AppUsbControl_Task(void)
+{
+    uint8_t rx[64];
+    int read_len;
+    UsbCtrlFrame frame;
+    size_t consumed;
+    UsbCtrlParseResult parse_result;
+    uint32_t now;
+
+    if (s_usb_ctrl.boot_mode == USB_CTRL_BOOT_USB_MSC) {
+        return;
+    }
+
+    do {
+        read_len = UsbCdcControl_Read(rx, sizeof(rx));
+        if (read_len > 0) {
+            AppUsbControl_OnRxBytes(rx, (uint16_t)read_len);
+        }
+    } while (read_len > 0);
+
+    while (s_usb_ctrl.rx_len > 0u) {
+        consumed = 0u;
+        parse_result = UsbCtrl_ParseFrame(s_usb_ctrl.rx_buf, s_usb_ctrl.rx_len, &frame, &consumed);
+        if (parse_result == USB_CTRL_PARSE_NEED_MORE) {
+            break;
+        }
+        if (parse_result == USB_CTRL_PARSE_OK) {
+            handle_frame(&frame);
+        } else if (parse_result == USB_CTRL_PARSE_BAD_CRC) {
+            s_usb_ctrl.last_error = USB_CTRL_ERROR_CRC;
+        } else if (parse_result == USB_CTRL_PARSE_BAD_VERSION) {
+            s_usb_ctrl.last_error = USB_CTRL_ERROR_VERSION;
+        } else {
+            s_usb_ctrl.last_error = USB_CTRL_ERROR_BAD_LENGTH;
+        }
+
+        if (consumed == 0u || consumed > s_usb_ctrl.rx_len) {
+            consumed = 1u;
+        }
+        for (uint16_t i = 0u; i < (uint16_t)(s_usb_ctrl.rx_len - consumed); ++i) {
+            s_usb_ctrl.rx_buf[i] = s_usb_ctrl.rx_buf[i + consumed];
+        }
+        s_usb_ctrl.rx_len = (uint16_t)(s_usb_ctrl.rx_len - consumed);
+    }
+
+    now = HAL_GetTick();
+    if ((now - s_usb_ctrl.last_report_ms) >= 250u) {
+        s_usb_ctrl.last_report_ms = now;
+        send_status(USB_CTRL_FRAME_REPORT, s_usb_ctrl.report_sequence++);
+    }
+}
+
+int AppUsbControl_BuildCurrentStatus(uint8_t frame_type,
+                                     uint16_t sequence,
+                                     uint8_t *out,
+                                     uint16_t out_size)
+{
+    uint8_t payload[USB_CTRL_STATUS_SNAPSHOT_LEN];
+    uint16_t payload_len = 0u;
+    UsbCtrlStatusSnapshot snapshot;
+
+    collect_status_snapshot(sequence, &snapshot);
+    if (!UsbCtrl_PackStatusSnapshot(&snapshot, payload, &payload_len)) {
+        return 0;
+    }
+
+    return (int)UsbCtrl_BuildFrame(frame_type,
+                                  sequence,
+                                  USB_CTRL_CMD_STATUS_SNAPSHOT,
+                                  payload,
+                                  payload_len,
+                                  out,
+                                  out_size);
+}
+
+static void send_ack(uint16_t sequence, uint8_t accepted_command, uint8_t status_code)
+{
+    uint8_t tx[USB_CTRL_MAX_FRAME_SIZE];
+    size_t len = UsbCtrl_BuildAck(sequence, accepted_command, status_code, tx, sizeof(tx));
+    if (len > 0u) {
+        (void)UsbCdcControl_Write(tx, (uint16_t)len);
+    }
+}
+
+static void send_nak(uint16_t sequence, uint8_t rejected_command, uint8_t error_code)
+{
+    uint8_t tx[USB_CTRL_MAX_FRAME_SIZE];
+    size_t len;
+
+    s_usb_ctrl.last_error = error_code;
+    len = UsbCtrl_BuildNak(sequence, rejected_command, error_code, tx, sizeof(tx));
+    if (len > 0u) {
+        (void)UsbCdcControl_Write(tx, (uint16_t)len);
+    }
+}
+
+static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *snapshot)
+{
+    uint32_t valve_mask = 0u;
+    uint16_t online_mask = 0u;
+    uint16_t low_mask = 0u;
+    uint16_t normal_mask = 0u;
+    uint16_t pass_mask = 0u;
+    uint32_t tolerance = AppStateMachine_GetPressureTolerance001mmHg();
+
+    if (snapshot == 0) {
+        return;
+    }
+
+    for (uint8_t valve = 1u; valve <= 26u; ++valve) {
+        if (AppValves_IsOpen(valve) != 0u) {
+            valve_mask |= (uint32_t)1u << (valve - 1u);
+        }
+    }
+
+    for (uint8_t ch = 0u; ch < APP_PCBA_CHANNEL_COUNT; ++ch) {
+        uint32_t pcba_pressure = AppStateMachine_GetPcbaTestPressure001mmHg(ch);
+        uint32_t fixture_pressure = AppPressure_Get001mmHg((PressureSensorIndex)(PRESSURE_SENSOR_CH1 + ch));
+        uint32_t delta = pcba_pressure > fixture_pressure ?
+                         pcba_pressure - fixture_pressure :
+                         fixture_pressure - pcba_pressure;
+
+        if (AppStateMachine_IsPcbaOnline(ch) != 0u) {
+            online_mask |= (uint16_t)(1u << ch);
+        }
+        if (AppStateMachine_IsPcbaLowPowerOk(ch) != 0u) {
+            low_mask |= (uint16_t)(1u << ch);
+        }
+        if (AppStateMachine_IsPcbaNormalPowerOk(ch) != 0u) {
+            normal_mask |= (uint16_t)(1u << ch);
+        }
+        if (pcba_pressure != 0u && delta <= tolerance) {
+            pass_mask |= (uint16_t)(1u << ch);
+        }
+        snapshot->pcba_pressure_001mmhg[ch] = pcba_pressure;
+    }
+
+    snapshot->uptime_ms = HAL_GetTick();
+    snapshot->boot_mode = UsbCdcControl_IsMscRebootPending() != 0u ?
+                          USB_CTRL_BOOT_MSC_REBOOT_PENDING :
+                          s_usb_ctrl.boot_mode;
+    snapshot->runtime_state = (uint8_t)AppStateMachine_GetState();
+    snapshot->workflow_flags = 0u;
+    snapshot->workflow_flags |= AppStateMachine_IsRunning() != 0u ? USB_CTRL_WORKFLOW_RUNNING : 0u;
+    snapshot->workflow_flags |= AppStateMachine_IsPaused() != 0u ? USB_CTRL_WORKFLOW_PAUSED : 0u;
+    snapshot->workflow_flags |= AppStateMachine_IsError() != 0u ? USB_CTRL_WORKFLOW_ERROR : 0u;
+    snapshot->workflow_flags |= AppStateMachine_IsManualMode() != 0u ? USB_CTRL_WORKFLOW_MANUAL : 0u;
+    snapshot->error_code = s_usb_ctrl.last_error;
+    snapshot->target_hold_pressure_mmhg = USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG;
+    snapshot->pressure_tolerance_001mmhg = (uint16_t)(tolerance > 0xFFFFu ? 0xFFFFu : tolerance);
+    snapshot->valve_open_mask = valve_mask;
+    snapshot->elapsed_in_state_ms = AppStateMachine_GetStateElapsedMs();
+    snapshot->snapshot_counter = sequence;
+    snapshot->pcba_online_mask = online_mask;
+    snapshot->pcba_low_power_ok_mask = low_mask;
+    snapshot->pcba_normal_power_ok_mask = normal_mask;
+    snapshot->pcba_pass_mask = pass_mask;
+
+    for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        snapshot->pressure_001mmhg[i] = AppPressure_Get001mmHg((PressureSensorIndex)i);
+    }
+}
+
+static void send_status(uint8_t frame_type, uint16_t sequence)
+{
+    uint8_t payload[USB_CTRL_STATUS_SNAPSHOT_LEN];
+    UsbCtrlStatusSnapshot snapshot;
+    uint8_t tx[USB_CTRL_MAX_FRAME_SIZE];
+    uint16_t payload_len = 0u;
+    size_t len;
+
+    collect_status_snapshot(sequence, &snapshot);
+    if (!UsbCtrl_PackStatusSnapshot(&snapshot, payload, &payload_len)) {
+        return;
+    }
+
+    len = UsbCtrl_BuildFrame(frame_type,
+                             sequence,
+                             USB_CTRL_CMD_STATUS_SNAPSHOT,
+                             payload,
+                             payload_len,
+                             tx,
+                             sizeof(tx));
+    if (len > 0u) {
+        (void)UsbCdcControl_Write(tx, (uint16_t)len);
+    }
+}
+
+static void handle_hello(const UsbCtrlFrame *frame)
+{
+    uint8_t payload[6];
+    uint8_t capability = 0x03u;
+    size_t len;
+    uint8_t tx[USB_CTRL_MAX_FRAME_SIZE];
+
+    if (frame->length != 2u || frame->payload[0] != USB_CTRL_PROTOCOL_VERSION) {
+        send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_VERSION);
+        return;
+    }
+
+    payload[0] = USB_CTRL_PROTOCOL_VERSION;
+    payload[1] = capability;
+    put_u16_le(&payload[2], USB_CTRL_MAX_PAYLOAD);
+    put_u16_le(&payload[4], 250u);
+    len = UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
+                             frame->sequence,
+                             USB_CTRL_CMD_HELLO,
+                             payload,
+                             sizeof(payload),
+                             tx,
+                             sizeof(tx));
+    if (len > 0u) {
+        (void)UsbCdcControl_Write(tx, (uint16_t)len);
+    }
+}
+
+static void handle_frame(const UsbCtrlFrame *frame)
+{
+    int rc = -1;
+
+    if (frame == 0 || frame->type != USB_CTRL_FRAME_REQUEST) {
+        return;
+    }
+
+    switch (frame->command) {
+    case USB_CTRL_CMD_HELLO:
+        handle_hello(frame);
+        return;
+
+    case USB_CTRL_CMD_GET_STATUS:
+        if (frame->length != 0u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        send_status(USB_CTRL_FRAME_RESPONSE, frame->sequence);
+        return;
+
+    case USB_CTRL_CMD_START:
+        if (frame->length != 3u || get_u16_le(frame->payload) > USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        rc = AppStateMachine_RequestStart();
+        break;
+
+    case USB_CTRL_CMD_STOP:
+        if (frame->length != 0u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        rc = AppStateMachine_RequestStop();
+        break;
+
+    case USB_CTRL_CMD_PAUSE:
+        rc = frame->length == 0u ? AppStateMachine_RequestPause() : -1;
+        break;
+
+    case USB_CTRL_CMD_RESUME:
+        rc = frame->length == 0u ? AppStateMachine_RequestResume() : -1;
+        break;
+
+    case USB_CTRL_CMD_SET_STATE:
+        if (frame->length != 1u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        rc = AppStateMachine_RequestState((AppRuntimeState)frame->payload[0]);
+        break;
+
+    case USB_CTRL_CMD_SET_THRESHOLD:
+        if (frame->length != 5u || frame->payload[0] != 0x02u || get_i32_le(&frame->payload[1]) < 0) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        AppStateMachine_SetPressureTolerance001mmHg((uint32_t)get_i32_le(&frame->payload[1]));
+        rc = 0;
+        break;
+
+    case USB_CTRL_CMD_MANUAL_VALVE:
+        if (frame->length != 4u || frame->payload[0] < 1u || frame->payload[0] > 26u || frame->payload[1] > 2u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        AppStateMachine_SetManualMode(1u);
+        if (frame->payload[1] == 2u) {
+            AppValves_Set(frame->payload[0], 1u);
+        } else {
+            AppValves_Set(frame->payload[0], frame->payload[1] == 1u ? 1u : 0u);
+        }
+        rc = 0;
+        break;
+
+    case USB_CTRL_CMD_ENTER_MSC_REBOOT:
+        if (frame->length != 4u ||
+            frame->payload[0] != 'M' ||
+            frame->payload[1] != 'S' ||
+            frame->payload[2] != 'C' ||
+            frame->payload[3] != '!') {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        (void)AppStateMachine_RequestStop();
+        UsbCdcControl_RequestMscReboot();
+        rc = 0;
+        break;
+
+    default:
+        send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_UNSUPPORTED);
+        return;
+    }
+
+    if (rc == 0) {
+        s_usb_ctrl.last_error = USB_CTRL_ERROR_OK;
+        send_ack(frame->sequence, frame->command, USB_CTRL_ERROR_OK);
+        send_status(USB_CTRL_FRAME_REPORT, s_usb_ctrl.report_sequence++);
+    } else {
+        send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_STATE);
+    }
+}
+
+__WEAK int UsbCdcControl_Start(void)
+{
+    return 0;
+}
+
+__WEAK int UsbCdcControl_Read(uint8_t *data, uint16_t max_len)
+{
+    (void)data;
+    (void)max_len;
+    return 0;
+}
+
+__WEAK int UsbCdcControl_Write(const uint8_t *data, uint16_t len)
+{
+    (void)data;
+    (void)len;
+    return 0;
+}
+
+__WEAK void UsbCdcControl_RequestMscReboot(void)
+{
+}
+
+__WEAK uint8_t UsbCdcControl_IsMscRebootPending(void)
+{
+    return 0u;
+}

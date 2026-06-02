@@ -20,6 +20,10 @@ typedef struct {
     uint8_t pcba_online[APP_PCBA_CHANNEL_COUNT];
     uint8_t pcba_low_power_ok[APP_PCBA_CHANNEL_COUNT];
     uint8_t pcba_normal_power_ok[APP_PCBA_CHANNEL_COUNT];
+    uint8_t running;
+    uint8_t paused;
+    uint8_t manual_mode;
+    uint32_t pressure_tolerance_001mmhg;
 } AppContext;
 
 static AppContext s_app;
@@ -56,6 +60,9 @@ static void enter_state(AppRuntimeState state)
     s_app.state = state;
     s_app.entered_at = HAL_GetTick();
     s_app.step_sent = 0u;
+    if (state == APP_STATE_ERROR) {
+        s_app.running = 0u;
+    }
 }
 
 static void set_all_flags(uint8_t *flags, uint8_t value)
@@ -206,6 +213,10 @@ void AppStateMachine_Init(AppBootMode mode)
         s_app.pcba_low_power_ok[i] = 0u;
         s_app.pcba_normal_power_ok[i] = 0u;
     }
+    s_app.running = 0u;
+    s_app.paused = 0u;
+    s_app.manual_mode = 0u;
+    s_app.pressure_tolerance_001mmhg = 3u * APP_PRESSURE_SCALE_PER_MMHG;
 
     AppPower_AllOff();
     AppValves_AllClosed();
@@ -226,6 +237,10 @@ void AppStateMachine_Init(AppBootMode mode)
 void AppStateMachine_Task(void)
 {
     AppPressure_Task();
+
+    if (s_app.paused != 0u && s_app.state != APP_STATE_USB_MSC) {
+        return;
+    }
 
     switch (s_app.state) {
     case APP_STATE_USB_MSC:
@@ -414,6 +429,70 @@ AppRuntimeState AppStateMachine_GetState(void)
     return s_app.state;
 }
 
+int AppStateMachine_RequestStart(void)
+{
+    if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+
+    s_app.running = 1u;
+    s_app.paused = 0u;
+    s_app.manual_mode = 0u;
+
+    if (s_app.state == APP_STATE_READY ||
+        s_app.state == APP_STATE_RESULT ||
+        s_app.state == APP_STATE_ERROR) {
+        enter_state(APP_STATE_PCBA_POWER_ON);
+    }
+
+    return 0;
+}
+
+int AppStateMachine_RequestStop(void)
+{
+    if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+
+    s_app.running = 0u;
+    s_app.paused = 0u;
+    s_app.manual_mode = 0u;
+    AppValves_AllClosed();
+    AppPower_AllOff();
+    enter_state(APP_STATE_READY);
+    return 0;
+}
+
+int AppStateMachine_RequestPause(void)
+{
+    if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+    s_app.paused = 1u;
+    return 0;
+}
+
+int AppStateMachine_RequestResume(void)
+{
+    if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+    s_app.paused = 0u;
+    return 0;
+}
+
+int AppStateMachine_RequestState(AppRuntimeState state)
+{
+    if (state >= APP_STATE_COUNT || state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+
+    s_app.paused = 0u;
+    s_app.running = (state != APP_STATE_READY && state != APP_STATE_ERROR) ? 1u : 0u;
+    enter_state(state);
+    return 0;
+}
+
 const char *AppStateMachine_GetStateName(AppRuntimeState state)
 {
     if (state >= APP_STATE_COUNT) {
@@ -425,6 +504,41 @@ const char *AppStateMachine_GetStateName(AppRuntimeState state)
 uint32_t AppStateMachine_GetStateElapsedMs(void)
 {
     return HAL_GetTick() - s_app.entered_at;
+}
+
+uint8_t AppStateMachine_IsRunning(void)
+{
+    return s_app.running;
+}
+
+uint8_t AppStateMachine_IsPaused(void)
+{
+    return s_app.paused;
+}
+
+uint8_t AppStateMachine_IsManualMode(void)
+{
+    return s_app.manual_mode;
+}
+
+uint8_t AppStateMachine_IsError(void)
+{
+    return s_app.state == APP_STATE_ERROR ? 1u : 0u;
+}
+
+void AppStateMachine_SetManualMode(uint8_t enabled)
+{
+    s_app.manual_mode = enabled != 0u ? 1u : 0u;
+}
+
+void AppStateMachine_SetPressureTolerance001mmHg(uint32_t tolerance_001mmhg)
+{
+    s_app.pressure_tolerance_001mmhg = tolerance_001mmhg;
+}
+
+uint32_t AppStateMachine_GetPressureTolerance001mmHg(void)
+{
+    return s_app.pressure_tolerance_001mmhg;
 }
 
 uint8_t AppStateMachine_IsPcbaOnline(uint8_t channel)

@@ -3,6 +3,7 @@
 #include "app_display.h"
 #include "app_keys.h"
 #include "app_state_machine.h"
+#include "app_usb_control.h"
 #include "board_pins.h"
 #include "lt768_basic.h"
 
@@ -52,10 +53,12 @@ int main(void)
     }
 
     AppStateMachine_Init(boot_mode);
+    AppUsbControl_Init(boot_mode);
     AppDisplay_Init(boot_mode);
 
     while (1) {
         AppStateMachine_Task();
+        AppUsbControl_Task();
         AppDisplay_Task();
         HAL_Delay(5u);
     }

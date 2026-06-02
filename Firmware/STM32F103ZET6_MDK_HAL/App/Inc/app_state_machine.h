@@ -37,9 +37,21 @@ typedef enum {
 
 void AppStateMachine_Init(AppBootMode mode);
 void AppStateMachine_Task(void);
+int AppStateMachine_RequestStart(void);
+int AppStateMachine_RequestStop(void);
+int AppStateMachine_RequestPause(void);
+int AppStateMachine_RequestResume(void);
+int AppStateMachine_RequestState(AppRuntimeState state);
 AppRuntimeState AppStateMachine_GetState(void);
 const char *AppStateMachine_GetStateName(AppRuntimeState state);
 uint32_t AppStateMachine_GetStateElapsedMs(void);
+uint8_t AppStateMachine_IsRunning(void);
+uint8_t AppStateMachine_IsPaused(void);
+uint8_t AppStateMachine_IsManualMode(void);
+uint8_t AppStateMachine_IsError(void);
+void AppStateMachine_SetManualMode(uint8_t enabled);
+void AppStateMachine_SetPressureTolerance001mmHg(uint32_t tolerance_001mmhg);
+uint32_t AppStateMachine_GetPressureTolerance001mmHg(void);
 uint8_t AppStateMachine_IsPcbaOnline(uint8_t channel);
 uint8_t AppStateMachine_IsPcbaLowPowerOk(uint8_t channel);
 uint8_t AppStateMachine_IsPcbaNormalPowerOk(uint8_t channel);

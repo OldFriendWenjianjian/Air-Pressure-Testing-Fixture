@@ -23,6 +23,7 @@ Listings/
 Debug/
 Release/
 build/
+build-*/
 
 # Editor and OS temporary files
 ~$*
