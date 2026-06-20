@@ -124,3 +124,18 @@ void BoardPins_ConfigSpi3Msc(void)
     HAL_GPIO_Init(W25Q_CS_GPIO_Port, &gpio);
     HAL_GPIO_WritePin(W25Q_CS_GPIO_Port, W25Q_CS_Pin, GPIO_PIN_SET);
 }
+
+void BoardPins_ConfigSpiFlashProgramming(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    BoardPins_ConfigSpi3Msc();
+
+    /* Keep the LT768/LCD controller reset during module SPI flash programming. */
+    HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_RESET);
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    gpio.Pin = LCD_RST_Pin;
+    HAL_GPIO_Init(LCD_RST_GPIO_Port, &gpio);
+}

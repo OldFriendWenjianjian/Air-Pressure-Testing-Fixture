@@ -32,6 +32,8 @@ typedef enum {
     APP_STATE_RESULT,
     APP_STATE_REFILL,
     APP_STATE_ERROR,
+    APP_STATE_PCBA_CURRENT_TEST,
+    APP_STATE_RTC_DEBUG,
     APP_STATE_COUNT
 } AppRuntimeState;
 
@@ -50,8 +52,11 @@ uint8_t AppStateMachine_IsPaused(void);
 uint8_t AppStateMachine_IsManualMode(void);
 uint8_t AppStateMachine_IsError(void);
 void AppStateMachine_SetManualMode(uint8_t enabled);
+void AppStateMachine_SetManualValve(uint8_t valve_number, uint8_t open);
 void AppStateMachine_SetPressureTolerance001mmHg(uint32_t tolerance_001mmhg);
 uint32_t AppStateMachine_GetPressureTolerance001mmHg(void);
+void AppStateMachine_SetPcbaCurrent50mAEnabled(uint8_t enabled);
+uint8_t AppStateMachine_IsPcbaCurrent50mAEnabled(void);
 uint8_t AppStateMachine_IsPcbaOnline(uint8_t channel);
 uint8_t AppStateMachine_IsPcbaLowPowerOk(uint8_t channel);
 uint8_t AppStateMachine_IsPcbaNormalPowerOk(uint8_t channel);

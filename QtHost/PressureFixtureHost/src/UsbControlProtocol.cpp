@@ -173,9 +173,37 @@ QByteArray buildEnterMscReboot(uint16_t sequence)
     return buildFrame(Request, sequence, EnterMscReboot, QByteArray("MSC!", 4));
 }
 
+QByteArray buildSetRtcTime(uint16_t sequence, uint32_t epochSeconds)
+{
+    QByteArray payload;
+    appendU32(payload, epochSeconds);
+    return buildFrame(Request, sequence, SetRtcTime, payload);
+}
+
+QByteArray buildSetPcbaCurrentRange(uint16_t sequence, bool enable50mA)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(enable50mA ? 1 : 0));
+    return buildFrame(Request, sequence, SetPcbaCurrentRange, payload);
+}
+
+QByteArray buildCalibrateAdc(uint16_t sequence)
+{
+    return buildFrame(Request, sequence, CalibrateAdc);
+}
+
 bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
 {
     constexpr qsizetype minimumLen = 118;
+    constexpr qsizetype pressureValidMaskOffset = 118;
+    constexpr qsizetype currentBaseOffset = 122;
+    constexpr qsizetype currentBlockBytes = kChannelCount * 4;
+    constexpr qsizetype currentValidMaskOffset = 186;
+    constexpr qsizetype rtcOffset = 190;
+    constexpr qsizetype pcbaCurrentFlagsOffset = 195;
+    constexpr qsizetype adcReferenceOffset = 196;
+    constexpr qsizetype currentRawAdcOffset = 208;
+    constexpr qsizetype currentRawAdcBlockBytes = kChannelCount * 2;
     if (payload.size() < minimumLen) {
         return false;
     }
@@ -202,7 +230,14 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     qsizetype offset = 30;
     for (int i = 0; i < kPressureSensorCount; ++i) {
         snapshot.pressure001mmHg[i] = static_cast<int>(getU32(payload, offset));
+        snapshot.pressureValid[i] = snapshot.pressure001mmHg[i] > 0;
         offset += 4;
+    }
+    if (payload.size() >= pressureValidMaskOffset + 4) {
+        const uint32_t pressureValidMask = getU32(payload, pressureValidMaskOffset);
+        for (int i = 0; i < kPressureSensorCount; ++i) {
+            snapshot.pressureValid[i] = (pressureValidMask & (1u << i)) != 0;
+        }
     }
     for (int i = 0; i < kChannelCount; ++i) {
         auto &channel = snapshot.channels[i];
@@ -213,7 +248,74 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
         channel.fixturePressure001mmHg = snapshot.pressure001mmHg[6 + i];
         channel.pressure001mmHg = static_cast<int>(getU32(payload, offset));
         channel.error001mmHg = channel.pressure001mmHg - channel.fixturePressure001mmHg;
+        channel.standbyCurrentValid = false;
+        channel.workCurrentValid = false;
+        channel.standbyCurrentUaX100 = 0;
+        channel.workCurrentUaX100 = 0;
+        channel.currentRawAdcValid = false;
+        channel.currentRawAdc = 0;
         offset += 4;
+    }
+    if (payload.size() >= currentBaseOffset + currentBlockBytes) {
+        uint16_t standbyCurrentValidMask = 0;
+        if (payload.size() >= currentValidMaskOffset + 2) {
+            standbyCurrentValidMask = getU16(payload, currentValidMaskOffset);
+        }
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            channel.standbyCurrentUaX100 = getU32(payload, currentBaseOffset + i * 4);
+            channel.standbyCurrentValid = payload.size() >= currentValidMaskOffset + 2
+                ? ((standbyCurrentValidMask & (1u << i)) != 0)
+                : channel.standbyCurrentUaX100 > 0;
+        }
+    }
+    if (payload.size() >= currentBaseOffset + currentBlockBytes * 2) {
+        uint16_t workCurrentValidMask = 0;
+        if (payload.size() >= currentValidMaskOffset + 4) {
+            workCurrentValidMask = getU16(payload, currentValidMaskOffset + 2);
+        }
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            channel.workCurrentUaX100 = getU32(payload, currentBaseOffset + currentBlockBytes + i * 4);
+            channel.workCurrentValid = payload.size() >= currentValidMaskOffset + 4
+                ? ((workCurrentValidMask & (1u << i)) != 0)
+                : channel.workCurrentUaX100 > 0;
+        }
+    }
+    snapshot.rtcSnapshotValid = false;
+    snapshot.rtcInitialized = false;
+    snapshot.rtcOscillatorReady = false;
+    snapshot.rtcBackupValid = false;
+    snapshot.rtcEpochSeconds = 0;
+    if (payload.size() >= rtcOffset + 5) {
+        const uint8_t flags = static_cast<uint8_t>(payload[rtcOffset + 4]);
+        snapshot.rtcSnapshotValid = true;
+        snapshot.rtcEpochSeconds = getU32(payload, rtcOffset);
+        snapshot.rtcInitialized = (flags & 0x01u) != 0;
+        snapshot.rtcOscillatorReady = (flags & 0x02u) != 0;
+        snapshot.rtcBackupValid = (flags & 0x04u) != 0;
+    }
+    snapshot.pcbaCurrent50mAEnabled = payload.size() > pcbaCurrentFlagsOffset &&
+                                      (static_cast<uint8_t>(payload[pcbaCurrentFlagsOffset]) & 0x01u) != 0;
+    snapshot.adcReferenceValid = false;
+    snapshot.adcReferenceRangeError = false;
+    snapshot.adcVrefintRaw = 0;
+    snapshot.adcVddaMv = 3300;
+    snapshot.adcScalePpm = 1000000;
+    if (payload.size() >= adcReferenceOffset + 12) {
+        const uint8_t flags = static_cast<uint8_t>(payload[adcReferenceOffset + 8]);
+        snapshot.adcVrefintRaw = getU16(payload, adcReferenceOffset);
+        snapshot.adcVddaMv = getU16(payload, adcReferenceOffset + 2);
+        snapshot.adcScalePpm = getU32(payload, adcReferenceOffset + 4);
+        snapshot.adcReferenceValid = (flags & 0x01u) != 0;
+        snapshot.adcReferenceRangeError = (flags & 0x02u) != 0;
+    }
+    if (payload.size() >= currentRawAdcOffset + currentRawAdcBlockBytes) {
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            channel.currentRawAdc = getU16(payload, currentRawAdcOffset + i * 2);
+            channel.currentRawAdcValid = true;
+        }
     }
     return true;
 }

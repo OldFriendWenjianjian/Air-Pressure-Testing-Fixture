@@ -23,6 +23,9 @@ typedef struct {
     uint8_t running;
     uint8_t paused;
     uint8_t manual_mode;
+    uint8_t pcba_current_50ma_enabled;
+    uint32_t manual_valve_override_mask;
+    uint32_t manual_valve_open_mask;
     uint32_t pressure_tolerance_001mmhg;
 } AppContext;
 
@@ -52,14 +55,22 @@ static const char *const s_state_names[APP_STATE_COUNT] = {
     "Test 285mmHg",
     "Result",
     "Refill",
-    "Error"
+    "Error",
+    "PCBA current test",
+    "RTC debug"
 };
 
 static void enter_state(AppRuntimeState state)
 {
+    const AppRuntimeState previous_state = s_app.state;
+
     s_app.state = state;
     s_app.entered_at = HAL_GetTick();
     s_app.step_sent = 0u;
+    if (previous_state == APP_STATE_PCBA_CURRENT_TEST &&
+        state != APP_STATE_PCBA_CURRENT_TEST) {
+        AppPower_Enable50mATestCircuit(0);
+    }
     if (state == APP_STATE_ERROR) {
         s_app.running = 0u;
     }
@@ -84,6 +95,27 @@ static void open_output_to_all_channels(uint8_t outlet_valve)
     AppValves_OpenMask(s_channel_valves, sizeof(s_channel_valves));
 }
 
+static void clear_manual_valve_overrides(void)
+{
+    s_app.manual_mode = 0u;
+    s_app.manual_valve_override_mask = 0u;
+    s_app.manual_valve_open_mask = 0u;
+}
+
+static void apply_manual_valve_overrides(void)
+{
+    if (s_app.manual_mode == 0u) {
+        return;
+    }
+
+    for (uint8_t valve = 1u; valve <= 26u; ++valve) {
+        uint32_t bit = (uint32_t)1u << (valve - 1u);
+        if ((s_app.manual_valve_override_mask & bit) != 0u) {
+            AppValves_Set(valve, (s_app.manual_valve_open_mask & bit) != 0u ? 1u : 0u);
+        }
+    }
+}
+
 static void refill_tanks(void)
 {
     static const uint8_t inlet_valves[6] = {1u, 3u, 5u, 7u, 9u, 11u};
@@ -104,6 +136,23 @@ static uint8_t work_current_measure_done(void)
     return elapsed(APP_PCBA_WORK_CURRENT_MEASURE_MS) &&
            AppCurrent_CaptureAll(APP_CURRENT_MODE_WORK) == 0 &&
            AppCurrent_WorkAllInRange();
+}
+
+static void pcba_current_test_task(void)
+{
+    static uint32_t last_capture_ms;
+    const uint32_t now = HAL_GetTick();
+
+    AppPower_Enable5V();
+    AppPower_Enable50mATestCircuit(s_app.pcba_current_50ma_enabled);
+    if (s_app.step_sent == 0u ||
+        (now - last_capture_ms) >= APP_PCBA_CURRENT_TEST_PERIOD_MS) {
+        (void)AppCurrent_CaptureAll(s_app.pcba_current_50ma_enabled != 0u ?
+                                    APP_CURRENT_MODE_WORK :
+                                    APP_CURRENT_MODE_STANDBY);
+        last_capture_ms = now;
+        s_app.step_sent = 1u;
+    }
 }
 
 static uint8_t all_tanks_ready(void)
@@ -215,7 +264,8 @@ void AppStateMachine_Init(AppBootMode mode)
     }
     s_app.running = 0u;
     s_app.paused = 0u;
-    s_app.manual_mode = 0u;
+    s_app.pcba_current_50ma_enabled = 0u;
+    clear_manual_valve_overrides();
     s_app.pressure_tolerance_001mmhg = 3u * APP_PRESSURE_SCALE_PER_MMHG;
 
     AppPower_AllOff();
@@ -225,12 +275,12 @@ void AppStateMachine_Init(AppBootMode mode)
     AppPcbaUart_Init();
 
     if (mode == APP_MODE_USB_MSC) {
-        BoardPins_ConfigSpi3Msc();
+        BoardPins_ConfigSpiFlashProgramming();
         (void)UsbMscApp_Start();
         enter_state(APP_STATE_USB_MSC);
     } else {
         BoardPins_ConfigSpi3Float();
-        enter_state(APP_STATE_INIT_TANKS);
+        enter_state(APP_STATE_READY);
     }
 }
 
@@ -417,11 +467,27 @@ void AppStateMachine_Task(void)
         break;
 
     case APP_STATE_ERROR:
+        AppValves_AllClosed();
+        AppPower_AllOff();
+        break;
+
+    case APP_STATE_PCBA_CURRENT_TEST:
+        AppValves_AllClosed();
+        pcba_current_test_task();
+        break;
+
+    case APP_STATE_RTC_DEBUG:
+        AppValves_AllClosed();
+        AppPower_AllOff();
+        break;
+
     default:
         AppValves_AllClosed();
         AppPower_AllOff();
         break;
     }
+
+    apply_manual_valve_overrides();
 }
 
 AppRuntimeState AppStateMachine_GetState(void)
@@ -437,12 +503,14 @@ int AppStateMachine_RequestStart(void)
 
     s_app.running = 1u;
     s_app.paused = 0u;
-    s_app.manual_mode = 0u;
+    clear_manual_valve_overrides();
 
     if (s_app.state == APP_STATE_READY ||
         s_app.state == APP_STATE_RESULT ||
         s_app.state == APP_STATE_ERROR) {
-        enter_state(APP_STATE_PCBA_POWER_ON);
+        AppValves_AllClosed();
+        AppPower_AllOff();
+        enter_state(APP_STATE_INIT_TANKS);
     }
 
     return 0;
@@ -456,7 +524,8 @@ int AppStateMachine_RequestStop(void)
 
     s_app.running = 0u;
     s_app.paused = 0u;
-    s_app.manual_mode = 0u;
+    s_app.pcba_current_50ma_enabled = 0u;
+    clear_manual_valve_overrides();
     AppValves_AllClosed();
     AppPower_AllOff();
     enter_state(APP_STATE_READY);
@@ -528,7 +597,28 @@ uint8_t AppStateMachine_IsError(void)
 
 void AppStateMachine_SetManualMode(uint8_t enabled)
 {
-    s_app.manual_mode = enabled != 0u ? 1u : 0u;
+    if (enabled != 0u) {
+        s_app.manual_mode = 1u;
+    } else {
+        clear_manual_valve_overrides();
+    }
+}
+
+void AppStateMachine_SetManualValve(uint8_t valve_number, uint8_t open)
+{
+    if (valve_number < 1u || valve_number > 26u) {
+        return;
+    }
+
+    uint32_t bit = (uint32_t)1u << (valve_number - 1u);
+    s_app.manual_mode = 1u;
+    s_app.manual_valve_override_mask |= bit;
+    if (open != 0u) {
+        s_app.manual_valve_open_mask |= bit;
+    } else {
+        s_app.manual_valve_open_mask &= ~bit;
+    }
+    AppValves_Set(valve_number, open != 0u ? 1u : 0u);
 }
 
 void AppStateMachine_SetPressureTolerance001mmHg(uint32_t tolerance_001mmhg)
@@ -539,6 +629,20 @@ void AppStateMachine_SetPressureTolerance001mmHg(uint32_t tolerance_001mmhg)
 uint32_t AppStateMachine_GetPressureTolerance001mmHg(void)
 {
     return s_app.pressure_tolerance_001mmhg;
+}
+
+void AppStateMachine_SetPcbaCurrent50mAEnabled(uint8_t enabled)
+{
+    s_app.pcba_current_50ma_enabled = enabled != 0u ? 1u : 0u;
+    if (s_app.state == APP_STATE_PCBA_CURRENT_TEST) {
+        AppPower_Enable50mATestCircuit(s_app.pcba_current_50ma_enabled);
+        s_app.step_sent = 0u;
+    }
+}
+
+uint8_t AppStateMachine_IsPcbaCurrent50mAEnabled(void)
+{
+    return s_app.pcba_current_50ma_enabled;
 }
 
 uint8_t AppStateMachine_IsPcbaOnline(uint8_t channel)

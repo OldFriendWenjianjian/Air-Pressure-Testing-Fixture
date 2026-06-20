@@ -13,9 +13,9 @@ qt_add_executable(PressureFixtureHost
     src/ArchitectureView.cpp
     src/MainWindow.cpp
     src/PressureFixtureModel.cpp
-    src/Simulator.cpp
     src/UsbControlProtocol.cpp
     src/WindowsSerialTransport.cpp
+    assets.qrc
 )
 
 target_include_directories(PressureFixtureHost PRIVATE include)

@@ -10,13 +10,13 @@
 #define USB_CTRL_FRAME_HEAD0                    0xA5u
 #define USB_CTRL_FRAME_HEAD1                    0x5Au
 #define USB_CTRL_PROTOCOL_VERSION               0x01u
-#define USB_CTRL_MAX_PAYLOAD                    192u
+#define USB_CTRL_MAX_PAYLOAD                    256u
 #define USB_CTRL_MIN_FRAME_SIZE                 11u
 #define USB_CTRL_MAX_FRAME_SIZE                 (USB_CTRL_MIN_FRAME_SIZE + USB_CTRL_MAX_PAYLOAD)
 #define USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG     285u
 #define USB_CTRL_PRESSURE_SENSOR_COUNT          14u
 #define USB_CTRL_PCBA_CHANNEL_COUNT             8u
-#define USB_CTRL_STATUS_SNAPSHOT_LEN            118u
+#define USB_CTRL_STATUS_SNAPSHOT_LEN            224u
 
 typedef enum {
     USB_CTRL_FRAME_REQUEST  = 0x01u,
@@ -35,6 +35,9 @@ typedef enum {
     USB_CTRL_CMD_SET_THRESHOLD     = 0x08u,
     USB_CTRL_CMD_MANUAL_VALVE      = 0x09u,
     USB_CTRL_CMD_ENTER_MSC_REBOOT  = 0x0Au,
+    USB_CTRL_CMD_SET_RTC_TIME      = 0x0Bu,
+    USB_CTRL_CMD_SET_PCBA_CURRENT_RANGE = 0x0Cu,
+    USB_CTRL_CMD_CALIBRATE_ADC     = 0x0Du,
     USB_CTRL_CMD_STATUS_SNAPSHOT   = 0x7Eu,
     USB_CTRL_CMD_ACK               = 0x7Fu,
     USB_CTRL_CMD_NAK               = 0x80u
@@ -100,6 +103,19 @@ typedef struct {
     uint16_t pcba_pass_mask;
     uint32_t pressure_001mmhg[USB_CTRL_PRESSURE_SENSOR_COUNT];
     uint32_t pcba_pressure_001mmhg[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint32_t pressure_valid_mask;
+    uint32_t pcba_standby_current_ua_x100[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint32_t pcba_work_current_ua_x100[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint16_t pcba_standby_current_valid_mask;
+    uint16_t pcba_work_current_valid_mask;
+    uint32_t rtc_epoch_seconds;
+    uint8_t rtc_flags;
+    uint8_t pcba_current_flags;
+    uint16_t adc_vrefint_raw;
+    uint16_t adc_vdda_mv;
+    uint32_t adc_scale_ppm;
+    uint8_t adc_calibration_flags;
+    uint16_t pcba_current_raw_adc[USB_CTRL_PCBA_CHANNEL_COUNT];
 } UsbCtrlStatusSnapshot;
 
 uint16_t UsbCtrl_Crc16Modbus(const uint8_t *data, size_t len);

@@ -1,17 +1,6 @@
 #include "usb_msc_app.h"
 #include "bsp_w25q128.h"
-
-#ifndef __WEAK
-#if defined(__CC_ARM)
-#define __WEAK __weak
-#else
-#define __WEAK __attribute__((weak))
-#endif
-#endif
-
-__WEAK void MX_USB_DEVICE_Init(void)
-{
-}
+#include "usb_msc_device.h"
 
 int UsbMscApp_Start(void)
 {
@@ -19,8 +8,7 @@ int UsbMscApp_Start(void)
         return -1;
     }
 
-    MX_USB_DEVICE_Init();
-    return 0;
+    return UsbMscDevice_Start();
 }
 
 void UsbMscApp_Task(void)

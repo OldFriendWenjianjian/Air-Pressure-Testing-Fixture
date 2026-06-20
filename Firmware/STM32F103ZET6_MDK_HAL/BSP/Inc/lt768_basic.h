@@ -16,6 +16,9 @@
 #define LT768_COLOR_LIGHT_GRAY   0x00E8E8E8u
 
 void LT768_BasicInit(void);
+void LT768_EnableColorBarTest(void);
+void LT768_ShowFramebufferTest(void);
+void LT768_CaptureDiagnostics(void);
 void LT768_ShowBootText(const char *text);
 void LT768_Clear(uint32_t color);
 void LT768_DrawText(uint16_t x, uint16_t y, uint32_t font_color, uint32_t background_color, const char *text);

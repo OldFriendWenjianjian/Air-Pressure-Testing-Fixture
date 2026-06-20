@@ -11,7 +11,7 @@ namespace fixture::usb {
 constexpr uint8_t kHead0 = 0xA5;
 constexpr uint8_t kHead1 = 0x5A;
 constexpr uint8_t kVersion = 0x01;
-constexpr qsizetype kMaxPayload = 192;
+constexpr qsizetype kMaxPayload = 256;
 constexpr qsizetype kMinFrameSize = 11;
 
 enum FrameType : uint8_t {
@@ -31,6 +31,9 @@ enum Command : uint8_t {
     SetThreshold = 0x08,
     ManualValve = 0x09,
     EnterMscReboot = 0x0A,
+    SetRtcTime = 0x0B,
+    SetPcbaCurrentRange = 0x0C,
+    CalibrateAdc = 0x0D,
     StatusSnapshot = 0x7E,
     Ack = 0x7F,
     Nak = 0x80,
@@ -61,6 +64,9 @@ QByteArray buildSetState(uint16_t sequence, RuntimeState state);
 QByteArray buildSetThreshold(uint16_t sequence, double thresholdMmHg);
 QByteArray buildManualValve(uint16_t sequence, uint8_t valveNumber, bool open);
 QByteArray buildEnterMscReboot(uint16_t sequence);
+QByteArray buildSetRtcTime(uint16_t sequence, uint32_t epochSeconds);
+QByteArray buildSetPcbaCurrentRange(uint16_t sequence, bool enable50mA);
+QByteArray buildCalibrateAdc(uint16_t sequence);
 bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot);
 QString frameSummary(const Frame &frame);
 

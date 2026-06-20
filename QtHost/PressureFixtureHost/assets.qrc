@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>assets/pressure_fixture_comic_transparent.png</file>
+    </qresource>
+</RCC>

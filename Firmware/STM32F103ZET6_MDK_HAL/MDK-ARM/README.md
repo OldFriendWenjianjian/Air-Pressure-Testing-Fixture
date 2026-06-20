@@ -27,5 +27,6 @@ MDK 下载步骤：
 
 1. `Drivers/STM32F1xx_HAL_Driver/Src/min_hal.c` 是当前工程自带的最小寄存器级 HAL 兼容层，已实现本项目用到的 GPIO、SysTick、RCC、ADC1、SPI2/SPI3、USART1/2/3、UART4/5 轮询收发。
 2. PCBA 串口固定为 `115200 8N1`，由 `App/Inc/app_config.h` 的 `APP_PCBA_UART_BAUDRATE` 定义。
-3. 长按 `KEY1(PC3)` 上电会进入 U 盘维护模式入口；当前工程已完成 W25Q128 块读写适配，但 USB Device Core/MSC Class 仍需用 STM32CubeF1 或 Keil Middleware 接入后才会在电脑端枚举成 U 盘。
-4. 后续真实硬件 bring-up 时，可以保留业务层代码，用 STM32CubeF1 官方 HAL/USB 栈替换最小兼容层和 weak `MX_USB_DEVICE_Init()`。
+3. 正常业务模式已接入最小 USB CDC ACM 设备，枚举后 Windows 会出现新的 `COMx`，Qt 上位机按现有二进制协议连接该串口控制 MCU。
+4. 长按 `KEY1(PC3)` 上电会进入 USB MSC 维护模式，W25Q128 以单 LUN、512 字节块的 U 盘方式暴露给电脑。
+5. 当前版本采用“正常 CDC / 长按 KEY1 MSC 维护入口”的双模式。若后续需要 CDC 与 MSC 同时在线，再引入 STM32CubeF1 官方 USB Device Core 的 CDC+MSC 复合设备。

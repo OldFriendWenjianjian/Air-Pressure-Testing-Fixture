@@ -1,6 +1,10 @@
 #include "app_usb_control.h"
+#include "app_adc_calibration.h"
 #include "app_config.h"
+#include "app_current.h"
+#include "app_power.h"
 #include "app_pressure.h"
+#include "app_rtc.h"
 #include "app_valves.h"
 #include "main.h"
 
@@ -51,6 +55,17 @@ static uint32_t get_u32_le(const uint8_t *p)
 static int32_t get_i32_le(const uint8_t *p)
 {
     return (int32_t)get_u32_le(p);
+}
+
+static uint32_t current_ua_to_x100(float current_ua)
+{
+    if (current_ua <= 0.0f) {
+        return 0u;
+    }
+    if (current_ua >= 42949672.0f) {
+        return 0xFFFFFFFFu;
+    }
+    return (uint32_t)((current_ua * 100.0f) + 0.5f);
 }
 
 uint16_t UsbCtrl_Crc16Modbus(const uint8_t *data, size_t len)
@@ -269,6 +284,28 @@ bool UsbCtrl_PackStatusSnapshot(const UsbCtrlStatusSnapshot *snapshot,
     for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
         put_u32_le(&payload[86u + ((uint16_t)i * 4u)], snapshot->pcba_pressure_001mmhg[i]);
     }
+    put_u32_le(&payload[118], snapshot->pressure_valid_mask);
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        put_u32_le(&payload[122u + ((uint16_t)i * 4u)], snapshot->pcba_standby_current_ua_x100[i]);
+    }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        put_u32_le(&payload[154u + ((uint16_t)i * 4u)], snapshot->pcba_work_current_ua_x100[i]);
+    }
+    put_u16_le(&payload[186], snapshot->pcba_standby_current_valid_mask);
+    put_u16_le(&payload[188], snapshot->pcba_work_current_valid_mask);
+    put_u32_le(&payload[190], snapshot->rtc_epoch_seconds);
+    payload[194] = snapshot->rtc_flags;
+    payload[195] = snapshot->pcba_current_flags;
+    put_u16_le(&payload[196], snapshot->adc_vrefint_raw);
+    put_u16_le(&payload[198], snapshot->adc_vdda_mv);
+    put_u32_le(&payload[200], snapshot->adc_scale_ppm);
+    payload[204] = snapshot->adc_calibration_flags;
+    payload[205] = 0u;
+    payload[206] = 0u;
+    payload[207] = 0u;
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        put_u16_le(&payload[208u + ((uint16_t)i * 2u)], snapshot->pcba_current_raw_adc[i]);
+    }
 
     *payload_len = USB_CTRL_STATUS_SNAPSHOT_LEN;
     return true;
@@ -302,6 +339,25 @@ bool UsbCtrl_UnpackStatusSnapshot(const uint8_t *payload,
     }
     for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
         snapshot->pcba_pressure_001mmhg[i] = get_u32_le(&payload[86u + ((uint16_t)i * 4u)]);
+    }
+    snapshot->pressure_valid_mask = get_u32_le(&payload[118]);
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        snapshot->pcba_standby_current_ua_x100[i] = get_u32_le(&payload[122u + ((uint16_t)i * 4u)]);
+    }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        snapshot->pcba_work_current_ua_x100[i] = get_u32_le(&payload[154u + ((uint16_t)i * 4u)]);
+    }
+    snapshot->pcba_standby_current_valid_mask = get_u16_le(&payload[186]);
+    snapshot->pcba_work_current_valid_mask = get_u16_le(&payload[188]);
+    snapshot->rtc_epoch_seconds = get_u32_le(&payload[190]);
+    snapshot->rtc_flags = payload[194];
+    snapshot->pcba_current_flags = payload[195];
+    snapshot->adc_vrefint_raw = get_u16_le(&payload[196]);
+    snapshot->adc_vdda_mv = get_u16_le(&payload[198]);
+    snapshot->adc_scale_ppm = get_u32_le(&payload[200]);
+    snapshot->adc_calibration_flags = payload[204];
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        snapshot->pcba_current_raw_adc[i] = get_u16_le(&payload[208u + ((uint16_t)i * 2u)]);
     }
 
     return true;
@@ -382,7 +438,7 @@ void AppUsbControl_Task(void)
     }
 
     now = HAL_GetTick();
-    if ((now - s_usb_ctrl.last_report_ms) >= 250u) {
+    if ((now - s_usb_ctrl.last_report_ms) >= APP_PC_LINK_STATUS_PERIOD_MS) {
         s_usb_ctrl.last_report_ms = now;
         send_status(USB_CTRL_FRAME_REPORT, s_usb_ctrl.report_sequence++);
     }
@@ -439,6 +495,9 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
     uint16_t low_mask = 0u;
     uint16_t normal_mask = 0u;
     uint16_t pass_mask = 0u;
+    uint16_t standby_current_valid_mask = 0u;
+    uint16_t work_current_valid_mask = 0u;
+    uint32_t pressure_valid_mask = 0u;
     uint32_t tolerance = AppStateMachine_GetPressureTolerance001mmHg();
 
     if (snapshot == 0) {
@@ -471,6 +530,17 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
             pass_mask |= (uint16_t)(1u << ch);
         }
         snapshot->pcba_pressure_001mmhg[ch] = pcba_pressure;
+        snapshot->pcba_standby_current_ua_x100[ch] =
+            current_ua_to_x100(AppCurrent_GetStandbyUa((uint8_t)(ch + 1u)));
+        snapshot->pcba_work_current_ua_x100[ch] =
+            current_ua_to_x100(AppCurrent_GetWorkUa((uint8_t)(ch + 1u)));
+        snapshot->pcba_current_raw_adc[ch] = AppCurrent_GetRaw((uint8_t)(ch + 1u));
+        if (AppCurrent_IsStandbyValid((uint8_t)(ch + 1u)) != 0u) {
+            standby_current_valid_mask |= (uint16_t)(1u << ch);
+        }
+        if (AppCurrent_IsWorkValid((uint8_t)(ch + 1u)) != 0u) {
+            work_current_valid_mask |= (uint16_t)(1u << ch);
+        }
     }
 
     snapshot->uptime_ms = HAL_GetTick();
@@ -493,10 +563,24 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
     snapshot->pcba_low_power_ok_mask = low_mask;
     snapshot->pcba_normal_power_ok_mask = normal_mask;
     snapshot->pcba_pass_mask = pass_mask;
+    snapshot->pcba_standby_current_valid_mask = standby_current_valid_mask;
+    snapshot->pcba_work_current_valid_mask = work_current_valid_mask;
+    snapshot->rtc_epoch_seconds = AppRtc_GetEpochSeconds();
+    snapshot->rtc_flags = AppRtc_GetFlags();
+    snapshot->pcba_current_flags = (AppStateMachine_GetState() == APP_STATE_PCBA_CURRENT_TEST &&
+                                    AppPower_Is50mATestCircuitEnabled() != 0u) ? 0x01u : 0u;
+    snapshot->adc_vrefint_raw = AppAdcCalibration_GetVrefintRaw();
+    snapshot->adc_vdda_mv = (uint16_t)AppAdcCalibration_GetVddaMv();
+    snapshot->adc_scale_ppm = AppAdcCalibration_GetScalePpm();
+    snapshot->adc_calibration_flags = AppAdcCalibration_GetFlags();
 
     for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        if (AppPressure_IsValid((PressureSensorIndex)i) != 0) {
+            pressure_valid_mask |= (uint32_t)1u << i;
+        }
         snapshot->pressure_001mmhg[i] = AppPressure_Get001mmHg((PressureSensorIndex)i);
     }
+    snapshot->pressure_valid_mask = pressure_valid_mask;
 }
 
 static void send_status(uint8_t frame_type, uint16_t sequence)
@@ -539,7 +623,7 @@ static void handle_hello(const UsbCtrlFrame *frame)
     payload[0] = USB_CTRL_PROTOCOL_VERSION;
     payload[1] = capability;
     put_u16_le(&payload[2], USB_CTRL_MAX_PAYLOAD);
-    put_u16_le(&payload[4], 250u);
+    put_u16_le(&payload[4], APP_PC_LINK_STATUS_PERIOD_MS);
     len = UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
                              frame->sequence,
                              USB_CTRL_CMD_HELLO,
@@ -619,12 +703,7 @@ static void handle_frame(const UsbCtrlFrame *frame)
             send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
             return;
         }
-        AppStateMachine_SetManualMode(1u);
-        if (frame->payload[1] == 2u) {
-            AppValves_Set(frame->payload[0], 1u);
-        } else {
-            AppValves_Set(frame->payload[0], frame->payload[1] == 1u ? 1u : 0u);
-        }
+        AppStateMachine_SetManualValve(frame->payload[0], frame->payload[1] == 0u ? 0u : 1u);
         rc = 0;
         break;
 
@@ -640,6 +719,38 @@ static void handle_frame(const UsbCtrlFrame *frame)
         (void)AppStateMachine_RequestStop();
         UsbCdcControl_RequestMscReboot();
         rc = 0;
+        break;
+
+    case USB_CTRL_CMD_SET_RTC_TIME:
+        if (frame->length != 4u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        rc = AppRtc_SetEpochSeconds(get_u32_le(frame->payload));
+        if (rc == 0) {
+            (void)AppStateMachine_RequestState(APP_STATE_RTC_DEBUG);
+        }
+        break;
+
+    case USB_CTRL_CMD_SET_PCBA_CURRENT_RANGE:
+        if (frame->length != 1u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        if (frame->payload[0] > 1u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        AppStateMachine_SetPcbaCurrent50mAEnabled(frame->payload[0]);
+        rc = 0;
+        break;
+
+    case USB_CTRL_CMD_CALIBRATE_ADC:
+        if (frame->length != 0u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        rc = AppAdcCalibration_Refresh();
         break;
 
     default:

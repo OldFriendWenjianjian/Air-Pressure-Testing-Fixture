@@ -11,6 +11,7 @@
 #define LT768_LCD_HSPW               1u
 
 static uint8_t s_lt768_ready;
+volatile uint8_t g_lt768_diagnostics[32];
 
 static void reg_write(uint8_t reg, uint8_t data)
 {
@@ -72,6 +73,13 @@ static void text_mode(void)
     reg_set_bits(0x03u, LT768_BIT(2), 0u);
 }
 
+static void select_main_window_24bpp(void)
+{
+    uint8_t value = reg_read(0x10u);
+    value |= LT768_BIT(3);
+    reg_write(0x10u, value);
+}
+
 static void panel_init_1024x600(void)
 {
     uint8_t value;
@@ -128,9 +136,63 @@ static void panel_init_1024x600(void)
     value |= LT768_BIT(1) | LT768_BIT(0);
     reg_write(0x5Eu, value);
 
+    select_main_window_24bpp();
+
     value = reg_read(0x12u);
     value |= LT768_BIT(6);
     reg_write(0x12u, value);
+}
+
+static void reg_write_u16(uint8_t reg_l, uint16_t value)
+{
+    reg_write(reg_l, (uint8_t)value);
+    reg_write((uint8_t)(reg_l + 1u), (uint8_t)(value >> 8));
+}
+
+static void reg_write_u32(uint8_t reg_l, uint32_t value)
+{
+    reg_write(reg_l, (uint8_t)value);
+    reg_write((uint8_t)(reg_l + 1u), (uint8_t)(value >> 8));
+    reg_write((uint8_t)(reg_l + 2u), (uint8_t)(value >> 16));
+    reg_write((uint8_t)(reg_l + 3u), (uint8_t)(value >> 24));
+}
+
+static void framebuffer_init(void)
+{
+    const uint32_t frame_addr = 0u;
+
+    reg_write_u32(0x20u, frame_addr);
+    reg_write_u16(0x24u, LT768_SCREEN_WIDTH);
+    reg_write_u16(0x26u, 0u);
+    reg_write_u16(0x28u, 0u);
+
+    reg_write_u32(0x50u, frame_addr);
+    reg_write_u16(0x54u, LT768_SCREEN_WIDTH);
+    reg_write_u16(0x56u, 0u);
+    reg_write_u16(0x58u, 0u);
+    reg_write_u16(0x5Au, LT768_SCREEN_WIDTH);
+    reg_write_u16(0x5Cu, LT768_SCREEN_HEIGHT);
+}
+
+static void backlight_on(void)
+{
+    uint8_t value;
+
+    reg_write(0x84u, 49u);
+
+    value = reg_read(0x85u);
+    value &= (uint8_t)~(LT768_BIT(7) | LT768_BIT(6) | LT768_BIT(2));
+    value |= LT768_BIT(3);
+    reg_write(0x85u, value);
+
+    reg_write(0x8Cu, 100u);
+    reg_write(0x8Du, 0u);
+    reg_write(0x8Eu, 100u);
+    reg_write(0x8Fu, 0u);
+
+    value = reg_read(0x86u);
+    value |= LT768_BIT(4);
+    reg_write(0x86u, value);
 }
 
 static void set_foreground_color(uint32_t color)
@@ -188,8 +250,52 @@ void LT768_BasicInit(void)
     (void)LT768_PortInit();
     s_lt768_ready = 1u;
     panel_init_1024x600();
+    framebuffer_init();
+    backlight_on();
     select_internal_font_16();
     graphic_mode();
+}
+
+void LT768_EnableColorBarTest(void)
+{
+    if (s_lt768_ready == 0u) {
+        return;
+    }
+
+    reg_set_bits(0x12u, LT768_BIT(5), 0u);
+}
+
+void LT768_ShowFramebufferTest(void)
+{
+    if (s_lt768_ready == 0u) {
+        return;
+    }
+
+    reg_set_bits(0x12u, 0u, LT768_BIT(5));
+    LT768_FillRect(0u, 0u, 170u, LT768_SCREEN_HEIGHT, LT768_COLOR_RED);
+    LT768_FillRect(170u, 0u, 340u, LT768_SCREEN_HEIGHT, LT768_COLOR_GREEN);
+    LT768_FillRect(340u, 0u, 510u, LT768_SCREEN_HEIGHT, LT768_COLOR_BLUE);
+    LT768_FillRect(510u, 0u, 680u, LT768_SCREEN_HEIGHT, LT768_COLOR_YELLOW);
+    LT768_FillRect(680u, 0u, 852u, LT768_SCREEN_HEIGHT, LT768_COLOR_LIGHT_GRAY);
+    LT768_FillRect(852u, 0u, LT768_SCREEN_WIDTH, LT768_SCREEN_HEIGHT, LT768_COLOR_DARK_GRAY);
+}
+
+void LT768_CaptureDiagnostics(void)
+{
+    static const uint8_t regs[] = {
+        0x01u, 0x02u, 0x03u, 0x05u, 0x06u, 0x07u, 0x08u, 0x09u,
+        0x0Au, 0x10u, 0x12u, 0x20u, 0x21u, 0x22u, 0x23u, 0x24u,
+        0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x5Eu, 0x84u,
+        0x85u, 0x86u, 0xE0u, 0xE1u, 0xE2u
+    };
+
+    g_lt768_diagnostics[0] = 0xA5u;
+    g_lt768_diagnostics[1] = LT768_ReadStatus();
+    g_lt768_diagnostics[2] = (uint8_t)sizeof(regs);
+
+    for (uint8_t i = 0u; i < (uint8_t)sizeof(regs); ++i) {
+        g_lt768_diagnostics[3u + i] = reg_read(regs[i]);
+    }
 }
 
 void LT768_ShowBootText(const char *text)
@@ -234,6 +340,6 @@ void LT768_FillRect(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint32_t
     set_foreground_color(color);
     square_start_xy(x1, y1);
     square_end_xy(x2, y2);
-    reg_set_bits(0x76u, LT768_BIT(7) | LT768_BIT(6), 0u);
+    reg_write(0x76u, 0xE0u);
     wait_2d_idle();
 }

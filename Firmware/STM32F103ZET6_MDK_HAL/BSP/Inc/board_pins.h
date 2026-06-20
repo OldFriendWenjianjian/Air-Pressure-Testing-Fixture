@@ -49,5 +49,6 @@ void BoardPins_ConfigOutputsSafe(void);
 void BoardPins_ConfigKeys(void);
 void BoardPins_ConfigSpi3Float(void);
 void BoardPins_ConfigSpi3Msc(void);
+void BoardPins_ConfigSpiFlashProgramming(void);
 
 #endif

@@ -1,9 +1,12 @@
 #include "main.h"
 #include "app_config.h"
+#include "app_adc_calibration.h"
 #include "app_display.h"
 #include "app_keys.h"
+#include "app_rtc.h"
 #include "app_state_machine.h"
 #include "app_usb_control.h"
+#include "app_valves.h"
 #include "board_pins.h"
 #include "lt768_basic.h"
 
@@ -18,6 +21,7 @@ UART_HandleTypeDef huart5;
 
 static void SystemClock_Config(void);
 static void MX_ADC1_Init(void);
+#if !APP_PC_LINK_BRINGUP_ONLY_ENABLED
 static void MX_SPI2_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_USART1_UART_Init(void);
@@ -26,31 +30,74 @@ static void MX_USART3_UART_Init(void);
 static void MX_UART4_Init(void);
 static void MX_UART5_Init(void);
 static AppBootMode DetectBootMode(void);
+#endif
+#if APP_VALVE1_0_1HZ_TEST_ENABLED
+static void Valve1BlinkTest_Task(void);
+#endif
 
 int main(void)
 {
     HAL_Init();
+#if APP_PC_LINK_JLINK_RTT_ENABLED
+    (void)UsbCdcControl_Start();
+#endif
+
     SystemClock_Config();
 
     BoardPins_EnableAllGpioClocks();
     BoardPins_ConfigOutputsSafe();
     BoardPins_ConfigKeys();
 
-    MX_ADC1_Init();
+#if APP_LT768_COLOR_BAR_TEST_ENABLED || APP_LT768_FRAMEBUFFER_TEST_ENABLED
     MX_SPI2_Init();
+    LT768_BasicInit();
+#if APP_LT768_COLOR_BAR_TEST_ENABLED
+    LT768_EnableColorBarTest();
+#else
+    LT768_ShowFramebufferTest();
+#endif
+    while (1) {
+        HAL_Delay(100u);
+    }
+#endif
+
+#if APP_VALVE1_0_1HZ_TEST_ENABLED
+    Valve1BlinkTest_Task();
+#endif
+
+#if APP_PC_LINK_BRINGUP_ONLY_ENABLED
+    MX_ADC1_Init();
+    AppAdcCalibration_Init();
+    AppRtc_Init();
+
+    AppBootMode boot_mode = APP_MODE_NORMAL;
+    AppStateMachine_Init(boot_mode);
+    AppUsbControl_Init(boot_mode);
+
+    while (1) {
+        AppStateMachine_Task();
+        AppUsbControl_Task();
+        HAL_Delay(5u);
+    }
+#else
+    MX_ADC1_Init();
+    AppAdcCalibration_Init();
+    AppRtc_Init();
+
+    AppBootMode boot_mode = DetectBootMode();
+
+    if (boot_mode == APP_MODE_NORMAL) {
+        MX_SPI2_Init();
+        LT768_BasicInit();
+        LT768_ShowBootText("Pressure Fixture");
+    }
+
     MX_SPI3_Init();
     MX_USART1_UART_Init();
     MX_USART2_UART_Init();
     MX_USART3_UART_Init();
     MX_UART4_Init();
     MX_UART5_Init();
-
-    AppBootMode boot_mode = DetectBootMode();
-
-    if (boot_mode == APP_MODE_NORMAL) {
-        LT768_BasicInit();
-        LT768_ShowBootText("Pressure Fixture");
-    }
 
     AppStateMachine_Init(boot_mode);
     AppUsbControl_Init(boot_mode);
@@ -62,16 +109,22 @@ int main(void)
         AppDisplay_Task();
         HAL_Delay(5u);
     }
+#endif
 }
 
-static AppBootMode DetectBootMode(void)
+#if APP_VALVE1_0_1HZ_TEST_ENABLED
+static void Valve1BlinkTest_Task(void)
 {
-    if (AppKeys_Key1HeldAtBoot(APP_KEY1_HOLD_TO_MSC_MS)) {
-        return APP_MODE_USB_MSC;
-    }
+    uint8_t open = 0u;
 
-    return APP_MODE_NORMAL;
+    AppValves_AllClosed();
+    while (1) {
+        open = open == 0u ? 1u : 0u;
+        AppValves_Set(1u, open);
+        HAL_Delay(APP_VALVE1_TEST_HALF_PERIOD_MS);
+    }
 }
+#endif
 
 static void SystemClock_Config(void)
 {
@@ -115,6 +168,16 @@ static void MX_ADC1_Init(void)
         Error_Handler();
     }
     (void)HAL_ADCEx_Calibration_Start(&hadc1);
+}
+
+#if !APP_PC_LINK_BRINGUP_ONLY_ENABLED
+static AppBootMode DetectBootMode(void)
+{
+    if (AppKeys_Key1HeldAtBoot(APP_KEY1_HOLD_TO_MSC_MS)) {
+        return APP_MODE_USB_MSC;
+    }
+
+    return APP_MODE_NORMAL;
 }
 
 static void MX_SPI2_Init(void)
@@ -203,6 +266,7 @@ static void MX_UART5_Init(void)
     __HAL_RCC_UART5_CLK_ENABLE();
     uart_common(&huart5, UART5);
 }
+#endif
 
 void Error_Handler(void)
 {

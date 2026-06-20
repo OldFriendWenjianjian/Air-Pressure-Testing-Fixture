@@ -37,11 +37,12 @@ enum class RuntimeState : uint8_t {
     Result,
     Refill,
     Error,
+    PcbaCurrentTest,
+    RtcDebug,
     Count
 };
 
 enum class LinkMode : uint8_t {
-    Simulation,
     UsbCdc,
     Disconnected
 };
@@ -70,11 +71,17 @@ struct PcbaChannelStatus {
     int pressure001mmHg = 0;
     int fixturePressure001mmHg = 0;
     int error001mmHg = 0;
+    bool standbyCurrentValid = false;
+    bool workCurrentValid = false;
+    uint32_t standbyCurrentUaX100 = 0;
+    uint32_t workCurrentUaX100 = 0;
+    bool currentRawAdcValid = false;
+    uint16_t currentRawAdc = 0;
 };
 
 struct FixtureSnapshot {
     RuntimeState state = RuntimeState::Ready;
-    LinkMode linkMode = LinkMode::Simulation;
+    LinkMode linkMode = LinkMode::Disconnected;
     bool running = false;
     bool paused = false;
     bool remoteControlEnabled = false;
@@ -83,7 +90,19 @@ struct FixtureSnapshot {
     double thresholdMmHg = 3.0;
     std::array<bool, kValveCount + 1> valvesOpen{};
     std::array<int, kPressureSensorCount> pressure001mmHg{};
+    std::array<bool, kPressureSensorCount> pressureValid{};
     std::array<PcbaChannelStatus, kChannelCount> channels{};
+    bool rtcSnapshotValid = false;
+    bool rtcInitialized = false;
+    bool rtcOscillatorReady = false;
+    bool rtcBackupValid = false;
+    uint32_t rtcEpochSeconds = 0;
+    bool pcbaCurrent50mAEnabled = false;
+    bool adcReferenceValid = false;
+    bool adcReferenceRangeError = false;
+    uint16_t adcVrefintRaw = 0;
+    uint16_t adcVddaMv = 3300;
+    uint32_t adcScalePpm = 1000000;
 };
 
 const std::array<TankSpec, kTankCount> &tankSpecs();
@@ -96,6 +115,10 @@ int stateIndex(RuntimeState state);
 QString commandName(uint8_t command);
 double toMmHg(int pressure001mmHg);
 int to001mmHg(double mmHg);
-void applyStateOutputs(FixtureSnapshot &snapshot, RuntimeState state);
+bool pressureSensorValid(const FixtureSnapshot &snapshot, int sensorIndex);
+QString formatPressure001mmHg(int pressure001mmHg, bool valid, int precision = 1, bool withUnit = false);
+QString sensorPressureText(const FixtureSnapshot &snapshot, int sensorIndex, int precision = 1, bool withUnit = false);
+QString formatCurrentUaX100(uint32_t currentUaX100, bool valid, int precision = 2, bool withUnit = false);
+QString formatCurrentUaX100AsMa(uint32_t currentUaX100, bool valid, int precision = 3, bool withUnit = false);
 
 } // namespace fixture

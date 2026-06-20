@@ -15,6 +15,7 @@ static uint32_t s_adc_channel;
 #define RCC_CFGR_ADCPRE_DIV6      (2UL << 14)
 #define RCC_CFGR_PLLSRC_HSE       (1UL << 16)
 #define RCC_CFGR_PLLMULL9         (7UL << 18)
+#define RCC_CFGR_USBPRE_DIV1_5    (0UL << 22)
 
 #define FLASH_ACR_PRFTBE          (1UL << 4)
 
@@ -47,6 +48,21 @@ static uint32_t s_adc_channel;
 
 __WEAK void HAL_MspInit(void)
 {
+}
+
+__WEAK void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc)
+{
+    (void)hadc;
+}
+
+__WEAK void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
+{
+    (void)hspi;
+}
+
+__WEAK void HAL_UART_MspInit(UART_HandleTypeDef *huart)
+{
+    (void)huart;
 }
 
 void HAL_Init(void)
@@ -110,9 +126,11 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(const RCC_ClkInitTypeDef *clk, uint32_t la
     (void)clk;
 
     FLASH->ACR = (FLASH->ACR & ~0x7UL) | (latency & 0x7UL) | FLASH_ACR_PRFTBE;
-    RCC->CFGR &= ~((0xFUL << 4) | (0x7UL << 8) | (0x7UL << 11) | (0x3UL << 14));
+    RCC->CFGR &= ~((0xFUL << 4) | (0x7UL << 8) | (0x7UL << 11) |
+                   (0x3UL << 14) | (1UL << 22));
     RCC->CFGR |= RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE1_DIV2 |
-                 RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_ADCPRE_DIV6;
+                 RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_ADCPRE_DIV6 |
+                 RCC_CFGR_USBPRE_DIV1_5;
     RCC->CFGR = (RCC->CFGR & ~0x3UL) | RCC_CFGR_SW_PLL;
 
     uint32_t start = HAL_GetTick();
@@ -180,6 +198,7 @@ HAL_StatusTypeDef HAL_ADC_Init(ADC_HandleTypeDef *hadc)
         return HAL_ERROR;
     }
 
+    HAL_ADC_MspInit(hadc);
     hadc->Instance->CR1 = 0U;
     hadc->Instance->CR2 = ADC_CR2_ADON;
     HAL_Delay(1U);
@@ -224,10 +243,12 @@ HAL_StatusTypeDef HAL_ADC_ConfigChannel(ADC_HandleTypeDef *hadc, ADC_ChannelConf
 
     if (s_adc_channel <= 9U) {
         uint32_t shift = s_adc_channel * 3U;
-        hadc->Instance->SMPR2 = (hadc->Instance->SMPR2 & ~(7UL << shift)) | (5UL << shift);
+        hadc->Instance->SMPR2 = (hadc->Instance->SMPR2 & ~(7UL << shift)) |
+                                ((channel->SamplingTime & 0x7UL) << shift);
     } else {
         uint32_t shift = (s_adc_channel - 10U) * 3U;
-        hadc->Instance->SMPR1 = (hadc->Instance->SMPR1 & ~(7UL << shift)) | (5UL << shift);
+        hadc->Instance->SMPR1 = (hadc->Instance->SMPR1 & ~(7UL << shift)) |
+                                ((channel->SamplingTime & 0x7UL) << shift);
     }
 
     return HAL_OK;
@@ -283,6 +304,7 @@ HAL_StatusTypeDef HAL_SPI_Init(SPI_HandleTypeDef *hspi)
         return HAL_ERROR;
     }
 
+    HAL_SPI_MspInit(hspi);
     uint32_t br = 0U;
     if (hspi->Init.BaudRatePrescaler >= 8U) {
         br = 2U;
@@ -396,6 +418,7 @@ HAL_StatusTypeDef HAL_UART_Init(UART_HandleTypeDef *huart)
         return HAL_ERROR;
     }
 
+    HAL_UART_MspInit(huart);
     uint32_t pclk = (huart->Instance == USART1) ? 72000000U : 36000000U;
     huart->Instance->CR1 = 0U;
     huart->Instance->CR2 = 0U;
@@ -446,4 +469,20 @@ HAL_StatusTypeDef HAL_UART_Receive(UART_HandleTypeDef *huart, uint8_t *data, uin
     }
 
     return HAL_OK;
+}
+
+void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t preempt_priority, uint32_t sub_priority)
+{
+    (void)sub_priority;
+    NVIC_SetPriority(IRQn, preempt_priority);
+}
+
+void HAL_NVIC_EnableIRQ(IRQn_Type IRQn)
+{
+    NVIC_EnableIRQ(IRQn);
+}
+
+void HAL_NVIC_DisableIRQ(IRQn_Type IRQn)
+{
+    NVIC_DisableIRQ(IRQn);
 }

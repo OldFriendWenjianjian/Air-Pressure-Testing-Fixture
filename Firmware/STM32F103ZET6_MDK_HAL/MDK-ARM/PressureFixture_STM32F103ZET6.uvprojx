@@ -16,7 +16,7 @@
         <TargetCommonOption>
           <Device>STM32F103ZE</Device>
           <Vendor>STMicroelectronics</Vendor>
-          <Cpu>IRAM(0x20000000,0x10000) IROM(0x08000000,0x80000) CPUTYPE("Cortex-M3") CLOCK(72000000) ELITTLE</Cpu>
+          <Cpu>IRAM(0x20000000,0x10000) IROM(0x08000000,0x7F800) CPUTYPE("Cortex-M3") CLOCK(72000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
           <StartupFile></StartupFile>
           <FlashDriverDll>UL2CM3(-S0 -C0 -P0 -FD20000000 -FC1000 -FN1 -FF0STM32F10x_512 -FS08000000 -FL080000)</FlashDriverDll>
@@ -250,7 +250,7 @@
               <IROM>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x80000</Size>
+                <Size>0x7f800</Size>
               </IROM>
               <XRAM>
                 <Type>0</Type>
@@ -275,7 +275,7 @@
               <OCR_RVCT4>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x80000</Size>
+                <Size>0x7f800</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>0</Type>
@@ -338,7 +338,7 @@
               <MiscControls></MiscControls>
               <Define>STM32F103xE,USE_HAL_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\Core\Inc;..\App\Inc;..\BSP\Inc;..\USB_DEVICE\App;..\Drivers\CMSIS\Include;..\Drivers\CMSIS\Device\ST\STM32F1xx\Include;..\Drivers\STM32F1xx_HAL_Driver\Inc</IncludePath>
+              <IncludePath>..\Core\Inc;..\App\Inc;..\BSP\Inc;..\USB_DEVICE\App;..\Middlewares\SEGGER_RTT\RTT;..\Middlewares\SEGGER_RTT\Config;..\Drivers\CMSIS\Include;..\Drivers\CMSIS\Device\ST\STM32F1xx\Include;..\Drivers\STM32F1xx_HAL_Driver\Inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -365,11 +365,11 @@
             <Rwpi>0</Rwpi>
             <noStLib>0</noStLib>
             <RepFail>1</RepFail>
-            <useFile>0</useFile>
+            <useFile>1</useFile>
             <TextAddressRange></TextAddressRange>
             <DataAddressRange></DataAddressRange>
             <pXoBase></pXoBase>
-            <ScatterFile></ScatterFile>
+            <ScatterFile>.\stm32f103ze.sct</ScatterFile>
             <IncludeLibs></IncludeLibs>
             <IncludeLibsPath></IncludeLibsPath>
             <Misc></Misc>
@@ -407,6 +407,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\stm32f1xx_it.c</FilePath>
             </File>
+            <File>
+              <FileName>retarget_no_semihosting.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\retarget_no_semihosting.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -426,6 +431,11 @@
               <FileName>app_current.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_current.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_adc_calibration.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_adc_calibration.c</FilePath>
             </File>
             <File>
               <FileName>app_pcba_uart.c</FileName>
@@ -451,6 +461,21 @@
               <FileName>app_usb_control.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_usb_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_rtc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_rtc.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_jlink_uart_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_jlink_uart_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_jlink_rtt_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_jlink_rtt_control.c</FilePath>
             </File>
             <File>
               <FileName>app_state_machine.c</FileName>
@@ -508,9 +533,29 @@
           <GroupName>USB_DEVICE</GroupName>
           <Files>
             <File>
+              <FileName>usb_cdc_device.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USB_DEVICE\App\usb_cdc_device.c</FilePath>
+            </File>
+            <File>
+              <FileName>usb_msc_device.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USB_DEVICE\App\usb_msc_device.c</FilePath>
+            </File>
+            <File>
               <FileName>storage_w25q_msc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\USB_DEVICE\App\storage_w25q_msc.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>SEGGER_RTT</GroupName>
+          <Files>
+            <File>
+              <FileName>SEGGER_RTT.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Middlewares\SEGGER_RTT\RTT\SEGGER_RTT.c</FilePath>
             </File>
           </Files>
         </Group>

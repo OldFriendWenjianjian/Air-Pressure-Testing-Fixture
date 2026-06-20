@@ -3,24 +3,26 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QFontMetricsF>
 #include <algorithm>
+#include <cmath>
 
 using namespace fixture;
 
 namespace {
-constexpr qreal kLogicalWidth = 2760.0;
-constexpr qreal kLogicalHeight = 980.0;
-constexpr qreal kTopY = 300.0;
-constexpr qreal kRegulatorY = 365.0;
-constexpr qreal kInletValveY = 430.0;
-constexpr qreal kTankY = 510.0;
-constexpr qreal kReliefY = 620.0;
-constexpr qreal kSensorY = 705.0;
-constexpr qreal kOutletValveY = 815.0;
-constexpr qreal kBusY = 910.0;
+constexpr qreal kLogicalWidth = 3180.0;
+constexpr qreal kLogicalHeight = 1180.0;
+constexpr qreal kTopY = 315.0;
+constexpr qreal kRegulatorY = 395.0;
+constexpr qreal kInletValveY = 470.0;
+constexpr qreal kTankY = 560.0;
+constexpr qreal kReliefY = 705.0;
+constexpr qreal kSensorY = 805.0;
+constexpr qreal kOutletValveY = 930.0;
+constexpr qreal kBusY = 1090.0;
 
-const std::array<qreal, kTankCount> tankX{170, 335, 500, 675, 860, 1045};
-const std::array<qreal, kChannelCount> channelX{1220, 1405, 1585, 1765, 1945, 2125, 2305, 2485};
+const std::array<qreal, kTankCount> tankX{150, 360, 570, 790, 1010, 1230};
+const std::array<qreal, kChannelCount> channelX{1465, 1675, 1885, 2095, 2305, 2515, 2725, 2935};
 
 }
 
@@ -28,7 +30,8 @@ ArchitectureView::ArchitectureView(QWidget *parent)
     : QWidget(parent)
 {
     setMouseTracking(true);
-    setMinimumSize(980, 620);
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    setZoom(1.0);
     setAutoFillBackground(false);
     m_blinkTimer.setInterval(420);
     connect(&m_blinkTimer, &QTimer::timeout, this, &ArchitectureView::toggleBlink);
@@ -39,6 +42,46 @@ ArchitectureView::ArchitectureView(QWidget *parent)
 void ArchitectureView::setSnapshot(const FixtureSnapshot &snapshot)
 {
     m_snapshot = snapshot;
+    for (auto it = m_pendingValveStates.begin(); it != m_pendingValveStates.end();) {
+        const int valve = it.key();
+        if (valve >= 1 && valve <= kValveCount && m_snapshot.valvesOpen[valve] == it.value()) {
+            it = m_pendingValveStates.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    update();
+}
+
+void ArchitectureView::setPendingValveCommand(int valveNumber, bool open)
+{
+    if (valveNumber < 1 || valveNumber > kValveCount) {
+        return;
+    }
+    m_pendingValveStates.insert(valveNumber, open);
+    update();
+}
+
+void ArchitectureView::clearPendingValveCommands()
+{
+    m_pendingValveStates.clear();
+    update();
+}
+
+double ArchitectureView::zoom() const
+{
+    return m_zoom;
+}
+
+void ArchitectureView::setZoom(double zoomFactor)
+{
+    m_zoom = std::clamp(zoomFactor, 0.35, 2.5);
+    const QSize scaledSize(static_cast<int>(std::lround(kLogicalWidth * m_zoom)),
+                           static_cast<int>(std::lround(kLogicalHeight * m_zoom)));
+    setMinimumSize(scaledSize);
+    setMaximumSize(scaledSize);
+    resize(scaledSize);
+    updateGeometry();
     update();
 }
 
@@ -53,62 +96,86 @@ void ArchitectureView::paintEvent(QPaintEvent *event)
     const QColor pipeIdle("#8c98a8");
     const QColor pipeActive = m_blinkOn ? QColor("#1f9d64") : QColor("#a4f0c7");
 
-    drawPipe(painter, {60, 300}, {150, 300}, pipeIdle, 4);
-    drawBox(painter, {40, 220, 40, 180}, "公司\n空压机\n气源", QColor("#e5edf7"), QColor("#65758b"));
-    drawBox(painter, {140, 285, 160, 30}, "车间气路通道", QColor("#e5edf7"), QColor("#65758b"));
-    drawPipe(painter, {300, 300}, {1140, 300}, pipeIdle, 4);
-    drawBox(painter, {140, kTopY - 15, 1000, 30}, "标定机内部气源母管", QColor("#eaf2ff"), QColor("#64748b"));
+    drawPipe(painter, {55, kTopY}, {150, kTopY}, pipeIdle, 6);
+    drawBox(painter, {20, 205, 70, 220}, "公司\n空压机\n气源", QColor("#e5edf7"), QColor("#65758b"), false, 16.0);
+    drawBox(painter, {150, kTopY - 25, 205, 50}, "车间气路通道", QColor("#e5edf7"), QColor("#65758b"), false, 17.0);
+    drawPipe(painter, {355, kTopY}, {1370, kTopY}, pipeIdle, 6);
+    drawBox(painter, {150, kTopY - 25, 1220, 50}, "标定机内部气源母管", QColor("#eaf2ff"), QColor("#64748b"), false, 17.0);
 
     for (int i = 0; i < kTankCount; ++i) {
         const qreal x = tankX[i];
         const auto &tank = tankSpecs()[i];
-        drawPipe(painter, {x + 55, kTopY + 15}, {x + 55, kRegulatorY}, pipeIdle, 3);
-        drawBox(painter, {x, kRegulatorY, 130, 30}, QString("减压阀 %1").arg(tank.targetMmHg), QColor("#eef2f7"), QColor("#94a3b8"));
-        drawPipe(painter, {x + 65, kRegulatorY + 30}, {x + 65, kInletValveY}, pipeIdle, 3);
-        drawValve(painter, tank.inletValve, {x, kInletValveY, 130, 36});
-        drawPipe(painter, {x + 65, kInletValveY + 36}, {x + 65, kTankY}, m_snapshot.valvesOpen[tank.inletValve] ? pipeActive : pipeIdle, 3);
-        drawTank(painter, i, {x + 10, kTankY, 110, 76});
-        drawPipe(painter, {x + 40, kTankY + 76}, {x + 40, kReliefY}, m_snapshot.valvesOpen[tank.reliefValve] ? pipeActive : pipeIdle, 3);
-        drawValve(painter, tank.reliefValve, {x + 10, kReliefY, 62, 46});
-        drawPipe(painter, {x + 75, kTankY + 76}, {x + 75, kSensorY}, pipeIdle, 2);
-        drawSensor(painter, tank.pressureSensor, {x + 10, kSensorY, 110, 58});
-        drawPipe(painter, {x + 65, kSensorY + 58}, {x + 65, kOutletValveY}, m_snapshot.valvesOpen[tank.outletValve] ? pipeActive : pipeIdle, 3);
-        drawValve(painter, tank.outletValve, {x + 10, kOutletValveY, 110, 54});
-        drawPipe(painter, {x + 65, kOutletValveY + 54}, {x + 65, kBusY}, m_snapshot.valvesOpen[tank.outletValve] ? pipeActive : pipeIdle, 3);
+        drawPipe(painter, {x + 80, kTopY + 25}, {x + 80, kRegulatorY}, pipeIdle, 4);
+        drawBox(painter, {x, kRegulatorY, 160, 46}, QString("减压阀 %1").arg(tank.targetMmHg), QColor("#eef2f7"), QColor("#94a3b8"), false, 17.0);
+        drawPipe(painter, {x + 80, kRegulatorY + 46}, {x + 80, kInletValveY}, pipeIdle, 4);
+        drawValve(painter, tank.inletValve, {x + 10, kInletValveY, 140, 52});
+        drawPipe(painter, {x + 80, kInletValveY + 52}, {x + 80, kTankY}, m_snapshot.valvesOpen[tank.inletValve] ? pipeActive : pipeIdle, 4);
+        drawTank(painter, i, {x + 5, kTankY, 150, 100});
+        drawPipe(painter, {x + 48, kTankY + 100}, {x + 48, kReliefY}, m_snapshot.valvesOpen[tank.reliefValve] ? pipeActive : pipeIdle, 4);
+        drawValve(painter, tank.reliefValve, {x + 12, kReliefY, 76, 58});
+        drawPipe(painter, {x + 112, kTankY + 100}, {x + 112, kSensorY}, pipeIdle, 3);
+        drawSensor(painter, tank.pressureSensor, {x + 5, kSensorY, 150, 78});
+        drawPipe(painter, {x + 80, kSensorY + 78}, {x + 80, kOutletValveY}, m_snapshot.valvesOpen[tank.outletValve] ? pipeActive : pipeIdle, 4);
+        drawValve(painter, tank.outletValve, {x + 15, kOutletValveY, 130, 70});
+        drawPipe(painter, {x + 80, kOutletValveY + 70}, {x + 80, kBusY}, m_snapshot.valvesOpen[tank.outletValve] ? pipeActive : pipeIdle, 4);
     }
 
-    drawBox(painter, {145, kBusY - 22, 2585, 44}, "八路 PCBA 共用压力母管", QColor("#f0f7ff"), QColor("#64748b"));
-    drawPipe(painter, {155, kBusY}, {2720, kBusY}, pipeIdle, 5);
+    drawBox(painter, {135, kBusY - 30, 2980, 60}, "八路 PCBA 共用压力母管", QColor("#f0f7ff"), QColor("#64748b"), false, 18.0);
+    drawPipe(painter, {150, kBusY}, {3100, kBusY}, pipeIdle, 7);
 
     for (int i = 0; i < kChannelCount; ++i) {
         const qreal x = channelX[i];
         const auto &channel = channelSpecs()[i];
         const bool open = m_snapshot.valvesOpen[channel.valve];
-        drawPipe(painter, {x + 60, kBusY}, {x + 60, kOutletValveY + 54}, open ? pipeActive : pipeIdle, 3);
-        drawValve(painter, channel.valve, {x, kOutletValveY, 120, 54});
-        drawPipe(painter, {x + 60, kOutletValveY}, {x + 60, kSensorY + 58}, open ? pipeActive : pipeIdle, 3);
-        drawSensor(painter, channel.pressureSensor, {x, kSensorY, 120, 58});
-        drawPipe(painter, {x + 60, kSensorY}, {x + 60, kTankY + 76}, open ? pipeActive : pipeIdle, 3);
-        drawChannel(painter, i, {x, kTankY, 120, 88});
+        drawPipe(painter, {x + 80, kBusY}, {x + 80, kOutletValveY + 70}, open ? pipeActive : pipeIdle, 4);
+        drawValve(painter, channel.valve, {x + 15, kOutletValveY, 130, 70});
+        drawPipe(painter, {x + 80, kOutletValveY}, {x + 80, kSensorY + 78}, open ? pipeActive : pipeIdle, 4);
+        drawSensor(painter, channel.pressureSensor, {x, kSensorY, 160, 78});
+        drawPipe(painter, {x + 80, kSensorY}, {x + 80, kTankY + 100}, open ? pipeActive : pipeIdle, 4);
+        drawChannel(painter, i, {x + 10, kTankY, 140, 104});
     }
 
-    drawBox(painter, {1570, 225, 490, 130},
-            "主控板 / USB CDC 控制\n状态: " + stateDisplayName(m_snapshot.state) +
-                QString("\n链路: %1").arg(m_snapshot.linkMode == LinkMode::UsbCdc ? "USB CDC" : "本地仿真"),
+    drawBox(painter, {1780, 145, 600, 150},
+            "主控板 / PC 控制\n状态: " + stateDisplayName(m_snapshot.state) +
+                QString("\n链路: %1").arg(m_snapshot.linkMode == LinkMode::UsbCdc ? "SEGGER RTT" : "未连接"),
             QColor("#ecfdf5"), QColor("#0f766e"), m_snapshot.remoteControlEnabled);
 }
 
 void ArchitectureView::mouseMoveEvent(QMouseEvent *event)
 {
-    const QPointF logical = QPointF(event->position().x(), event->position().y());
-    QString text;
-    for (auto it = m_hitRects.cbegin(); it != m_hitRects.cend(); ++it) {
-        if (mapRect(it.value()).contains(logical)) {
-            text = tooltipForKey(it.key());
-            break;
+    const QString key = hitKeyAt(event->position());
+    setToolTip(tooltipForKey(key));
+    setCursor(key.startsWith("valve:") || key.startsWith("sensor:") ? Qt::PointingHandCursor : Qt::ArrowCursor);
+}
+
+void ArchitectureView::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+
+    const QString key = hitKeyAt(event->position());
+    if (!key.startsWith("valve:") && !key.startsWith("sensor:")) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+
+    const QStringList parts = key.split(':');
+    if (parts.size() == 2) {
+        const int number = parts[1].toInt();
+        if (parts[0] == "valve" && number >= 1 && number <= kValveCount) {
+            emit valveClicked(number);
+            event->accept();
+            return;
+        }
+        if (parts[0] == "sensor" && number >= 1 && number <= kPressureSensorCount) {
+            emit sensorClicked(number);
+            event->accept();
+            return;
         }
     }
-    setToolTip(text);
+    QWidget::mousePressEvent(event);
 }
 
 void ArchitectureView::toggleBlink()
@@ -119,11 +186,9 @@ void ArchitectureView::toggleBlink()
 
 QRectF ArchitectureView::mapRect(const QRectF &logical) const
 {
-    const qreal sx = width() / kLogicalWidth;
-    const qreal sy = height() / kLogicalHeight;
-    const qreal scale = std::min(sx, sy);
-    const qreal ox = (width() - kLogicalWidth * scale) / 2.0;
-    const qreal oy = (height() - kLogicalHeight * scale) / 2.0;
+    const qreal scale = m_zoom;
+    const qreal ox = 0.0;
+    const qreal oy = 0.0;
     return {ox + logical.x() * scale, oy + logical.y() * scale, logical.width() * scale, logical.height() * scale};
 }
 
@@ -137,6 +202,9 @@ QColor ArchitectureView::valveColor(int valve) const
     if (valve < 1 || valve > kValveCount) {
         return QColor("#cbd5e1");
     }
+    if (m_pendingValveStates.contains(valve)) {
+        return m_blinkOn ? QColor("#facc15") : QColor("#fef3c7");
+    }
     if (m_snapshot.valvesOpen[valve]) {
         return m_blinkOn ? QColor("#22c55e") : QColor("#bbf7d0");
     }
@@ -145,13 +213,16 @@ QColor ArchitectureView::valveColor(int valve) const
 
 QColor ArchitectureView::tankColor(int tankIndex) const
 {
+    if (!pressureSensorValid(m_snapshot, tankIndex)) {
+        return QColor("#f1f5f9");
+    }
     const int pressure = m_snapshot.pressure001mmHg[tankIndex];
     const int target = to001mmHg(tankSpecs()[tankIndex].targetMmHg);
     const bool close = std::abs(pressure - target) <= to001mmHg(3.0);
     if (close) {
-        return m_blinkOn ? QColor("#dbeafe") : QColor("#f8fafc");
+        return QColor("#dbeafe");
     }
-    return m_blinkOn ? QColor("#fde68a") : QColor("#fff7ed");
+    return QColor("#fde68a");
 }
 
 QColor ArchitectureView::channelColor(int channelIndex) const
@@ -169,57 +240,78 @@ QColor ArchitectureView::channelColor(int channelIndex) const
 void ArchitectureView::drawPipe(QPainter &painter, const QPointF &a, const QPointF &b, const QColor &color, qreal width) const
 {
     QPen pen(color, width);
+    pen.setWidthF(width * m_zoom);
     pen.setCapStyle(Qt::RoundCap);
     painter.setPen(pen);
     painter.drawLine(mapPoint(a), mapPoint(b));
 }
 
-void ArchitectureView::drawBox(QPainter &painter, const QRectF &rect, const QString &text, const QColor &fill, const QColor &stroke, bool strong) const
+void ArchitectureView::drawBox(QPainter &painter,
+                               const QRectF &rect,
+                               const QString &text,
+                               const QColor &fill,
+                               const QColor &stroke,
+                               bool strong,
+                               qreal fontPx) const
 {
     const QRectF r = mapRect(rect);
-    painter.setPen(QPen(stroke, strong ? 2.5 : 1.4));
+    painter.setPen(QPen(stroke, (strong ? 2.5 : 1.4) * m_zoom));
     painter.setBrush(fill);
-    painter.drawRoundedRect(r, 7, 7);
+    painter.drawRoundedRect(r, 7 * m_zoom, 7 * m_zoom);
     painter.setPen(QColor("#1f2937"));
     QFont f = painter.font();
-    f.setPointSizeF(std::max(7.5, r.height() / 7.0));
+    f.setPixelSize(std::max(7, static_cast<int>(std::lround(fontPx * m_zoom))));
     f.setBold(strong);
     painter.setFont(f);
-    painter.drawText(r.adjusted(5, 3, -5, -3), Qt::AlignCenter | Qt::TextWordWrap, text);
+    QRectF textRect = r.adjusted(8 * m_zoom, 5 * m_zoom, -8 * m_zoom, -5 * m_zoom);
+    QFontMetricsF metrics(f);
+    QRectF bounds = metrics.boundingRect(textRect, Qt::AlignCenter | Qt::TextWordWrap, text);
+    while ((bounds.width() > textRect.width() || bounds.height() > textRect.height()) && f.pixelSize() > std::max(7, static_cast<int>(std::lround(12 * m_zoom)))) {
+        f.setPixelSize(f.pixelSize() - 1);
+        painter.setFont(f);
+        metrics = QFontMetricsF(f);
+        bounds = metrics.boundingRect(textRect, Qt::AlignCenter | Qt::TextWordWrap, text);
+    }
+    painter.drawText(textRect, Qt::AlignCenter | Qt::TextWordWrap, text);
 }
 
 void ArchitectureView::drawValve(QPainter &painter, int valve, const QRectF &rect) const
 {
     const bool open = valve >= 1 && valve <= kValveCount && m_snapshot.valvesOpen[valve];
-    const QColor stroke = open ? QColor("#15803d") : QColor("#64748b");
-    drawBox(painter, rect, QString("阀%1\n%2").arg(valve).arg(open ? "开" : "关"), valveColor(valve), stroke, open);
+    const bool pending = m_pendingValveStates.contains(valve);
+    const bool pendingOpen = pending && m_pendingValveStates.value(valve);
+    const QColor stroke = pending ? QColor("#d97706") : (open ? QColor("#15803d") : QColor("#64748b"));
+    const QString stateText = pending ? QString("待%1").arg(pendingOpen ? "开" : "关") : QString(open ? "开" : "关");
+    drawBox(painter, rect, QString("阀%1\n%2").arg(valve).arg(stateText), valveColor(valve), stroke, open || pending, 20.0);
 }
 
 void ArchitectureView::drawTank(QPainter &painter, int index, const QRectF &rect) const
 {
     const auto &tank = tankSpecs()[index];
-    const double pressure = toMmHg(m_snapshot.pressure001mmHg[index]);
-    const QString text = QString("%1\n%2 mmHg").arg(tank.name).arg(pressure, 0, 'f', 1);
-    drawBox(painter, rect, text, tankColor(index), QColor("#2563eb"), true);
+    const QString text = QString("%1\n目标 %2 mmHg\n实际 %3")
+                             .arg(tank.name)
+                             .arg(tank.targetMmHg)
+                             .arg(sensorPressureText(m_snapshot, index, 1, true));
+    drawBox(painter, rect, text, tankColor(index), QColor("#2563eb"), true, 17.0);
 }
 
 void ArchitectureView::drawSensor(QPainter &painter, int sensorNumber, const QRectF &rect) const
 {
     const int index = sensorNumber - 1;
-    const double pressure = index >= 0 && index < kPressureSensorCount ? toMmHg(m_snapshot.pressure001mmHg[index]) : 0.0;
     drawBox(painter, rect,
-            QString("压力检测%1\n%2 mmHg").arg(sensorNumber).arg(pressure, 0, 'f', 1),
-            QColor("#fff7ed"), QColor("#ea580c"));
+            QString("压力检测%1\n%2").arg(sensorNumber).arg(sensorPressureText(m_snapshot, index, 1, true)),
+            QColor("#fff7ed"), QColor("#ea580c"), false, 17.0);
 }
 
 void ArchitectureView::drawChannel(QPainter &painter, int channelIndex, const QRectF &rect) const
 {
     const auto &status = m_snapshot.channels[channelIndex];
+    const bool pcbaPressureValid = status.online && status.pressure001mmHg > 0;
     const QString text = QString("PCBA%1\n%2\n测值 %3")
                              .arg(channelIndex + 1)
                              .arg(status.online ? "在线" : "离线")
-                             .arg(status.pressure001mmHg > 0 ? QString("%1mmHg").arg(toMmHg(status.pressure001mmHg), 0, 'f', 1) : "--");
-    drawBox(painter, rect, text, channelColor(channelIndex), status.online ? QColor("#0f766e") : QColor("#64748b"), status.online);
+                             .arg(formatPressure001mmHg(status.pressure001mmHg, pcbaPressureValid, 1, true));
+    drawBox(painter, rect, text, channelColor(channelIndex), status.online ? QColor("#0f766e") : QColor("#64748b"), status.online, 18.0);
 }
 
 void ArchitectureView::rebuildHitMap()
@@ -227,19 +319,29 @@ void ArchitectureView::rebuildHitMap()
     for (int i = 0; i < kTankCount; ++i) {
         const qreal x = tankX[i];
         const auto &tank = tankSpecs()[i];
-        m_hitRects.insert(QString("valve:%1").arg(tank.inletValve), {x, kInletValveY, 130, 36});
-        m_hitRects.insert(QString("tank:%1").arg(i), {x + 10, kTankY, 110, 76});
-        m_hitRects.insert(QString("valve:%1").arg(tank.reliefValve), {x + 10, kReliefY, 62, 46});
-        m_hitRects.insert(QString("sensor:%1").arg(tank.pressureSensor), {x + 10, kSensorY, 110, 58});
-        m_hitRects.insert(QString("valve:%1").arg(tank.outletValve), {x + 10, kOutletValveY, 110, 54});
+        m_hitRects.insert(QString("valve:%1").arg(tank.inletValve), {x + 10, kInletValveY, 140, 52});
+        m_hitRects.insert(QString("tank:%1").arg(i), {x + 5, kTankY, 150, 100});
+        m_hitRects.insert(QString("valve:%1").arg(tank.reliefValve), {x + 12, kReliefY, 76, 58});
+        m_hitRects.insert(QString("sensor:%1").arg(tank.pressureSensor), {x + 5, kSensorY, 150, 78});
+        m_hitRects.insert(QString("valve:%1").arg(tank.outletValve), {x + 15, kOutletValveY, 130, 70});
     }
     for (int i = 0; i < kChannelCount; ++i) {
         const qreal x = channelX[i];
         const auto &channel = channelSpecs()[i];
-        m_hitRects.insert(QString("channel:%1").arg(i), {x, kTankY, 120, 88});
-        m_hitRects.insert(QString("sensor:%1").arg(channel.pressureSensor), {x, kSensorY, 120, 58});
-        m_hitRects.insert(QString("valve:%1").arg(channel.valve), {x, kOutletValveY, 120, 54});
+        m_hitRects.insert(QString("channel:%1").arg(i), {x + 10, kTankY, 140, 104});
+        m_hitRects.insert(QString("sensor:%1").arg(channel.pressureSensor), {x, kSensorY, 160, 78});
+        m_hitRects.insert(QString("valve:%1").arg(channel.valve), {x + 15, kOutletValveY, 130, 70});
     }
+}
+
+QString ArchitectureView::hitKeyAt(const QPointF &widgetPosition) const
+{
+    for (auto it = m_hitRects.cbegin(); it != m_hitRects.cend(); ++it) {
+        if (mapRect(it.value()).contains(widgetPosition)) {
+            return it.key();
+        }
+    }
+    return {};
 }
 
 QString ArchitectureView::tooltipForKey(const QString &key) const
@@ -250,27 +352,34 @@ QString ArchitectureView::tooltipForKey(const QString &key) const
     }
     const int number = parts[1].toInt();
     if (parts[0] == "valve") {
+        if (m_pendingValveStates.contains(number)) {
+            return QString("阀%1: 待 MCU 确认%2，当前%3")
+                .arg(number)
+                .arg(m_pendingValveStates.value(number) ? "打开" : "关闭")
+                .arg(m_snapshot.valvesOpen[number] ? "打开" : "关闭");
+        }
         return QString("阀%1: %2").arg(number).arg(m_snapshot.valvesOpen[number] ? "打开" : "关闭");
     }
     if (parts[0] == "tank") {
         const auto &tank = tankSpecs()[number];
-        return QString("%1\n目标 %2mmHg\n当前 %3mmHg")
+        return QString("%1\n目标 %2mmHg\n实际 %3")
             .arg(tank.name)
             .arg(tank.targetMmHg)
-            .arg(toMmHg(m_snapshot.pressure001mmHg[number]), 0, 'f', 1);
+            .arg(sensorPressureText(m_snapshot, number, 1, true));
     }
     if (parts[0] == "sensor") {
-        return QString("压力检测%1: %2mmHg")
+        return QString("压力检测%1: %2")
             .arg(number)
-            .arg(toMmHg(m_snapshot.pressure001mmHg[number - 1]), 0, 'f', 1);
+            .arg(sensorPressureText(m_snapshot, number - 1, 1, true));
     }
     if (parts[0] == "channel") {
         const auto &channel = m_snapshot.channels[number];
-        return QString("PCBA%1\n连接: %2\n测得气压: %3mmHg\n误差: %4mmHg")
+        const bool pressureValid = channel.online && channel.pressure001mmHg > 0;
+        return QString("PCBA%1\n连接: %2\n测得气压: %3\n误差: %4")
             .arg(number + 1)
             .arg(channel.online ? "在线" : "离线")
-            .arg(toMmHg(channel.pressure001mmHg), 0, 'f', 1)
-            .arg(toMmHg(channel.error001mmHg), 0, 'f', 2);
+            .arg(formatPressure001mmHg(channel.pressure001mmHg, pressureValid, 1, true))
+            .arg(pressureValid ? QString("%1 mmHg").arg(toMmHg(channel.error001mmHg), 0, 'f', 2) : "--");
     }
     return {};
 }

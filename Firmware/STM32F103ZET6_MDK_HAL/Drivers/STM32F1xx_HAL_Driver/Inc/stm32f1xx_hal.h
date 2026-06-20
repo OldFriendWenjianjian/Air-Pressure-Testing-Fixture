@@ -81,7 +81,8 @@ typedef struct {
 #define ADC_SOFTWARE_START        0U
 #define ADC_DATAALIGN_RIGHT       0U
 #define ADC_REGULAR_RANK_1        1U
-#define ADC_SAMPLETIME_55CYCLES_5 0U
+#define ADC_SAMPLETIME_55CYCLES_5 5U
+#define ADC_SAMPLETIME_239CYCLES_5 7U
 #define ADC_CHANNEL_0             0U
 #define ADC_CHANNEL_1             1U
 #define ADC_CHANNEL_2             2U
@@ -96,6 +97,10 @@ typedef struct {
 #define ADC_CHANNEL_11            11U
 #define ADC_CHANNEL_12            12U
 #define ADC_CHANNEL_13            13U
+#define ADC_CHANNEL_14            14U
+#define ADC_CHANNEL_15            15U
+#define ADC_CHANNEL_16            16U
+#define ADC_CHANNEL_17            17U
 
 typedef struct {
     SPI_TypeDef *Instance;
@@ -200,6 +205,10 @@ typedef struct {
 #define __HAL_RCC_USART3_CLK_ENABLE()     (RCC->APB1ENR |= (1UL << 18))
 #define __HAL_RCC_UART4_CLK_ENABLE()      (RCC->APB1ENR |= (1UL << 19))
 #define __HAL_RCC_UART5_CLK_ENABLE()      (RCC->APB1ENR |= (1UL << 20))
+#define __HAL_RCC_USB_CLK_ENABLE()        (RCC->APB1ENR |= (1UL << 23))
+#define __HAL_RCC_USB_CLK_DISABLE()       (RCC->APB1ENR &= ~(1UL << 23))
+#define __HAL_RCC_USB_FORCE_RESET()       (RCC->APB1RSTR |= (1UL << 23))
+#define __HAL_RCC_USB_RELEASE_RESET()     (RCC->APB1RSTR &= ~(1UL << 23))
 #define __HAL_AFIO_REMAP_SWJ_NOJTAG()     do { AFIO->MAPR = (AFIO->MAPR & ~(7UL << 24)) | (2UL << 24); } while (0)
 #define __HAL_AFIO_REMAP_USART2_ENABLE()  (AFIO->MAPR |= (1UL << 3))
 #define __HAL_AFIO_REMAP_USART3_ENABLE()  do { AFIO->MAPR = (AFIO->MAPR & ~(3UL << 4)) | (3UL << 4); } while (0)
@@ -232,6 +241,9 @@ HAL_StatusTypeDef HAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *tx, 
 HAL_StatusTypeDef HAL_UART_Init(UART_HandleTypeDef *huart);
 HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len, uint32_t timeout);
 HAL_StatusTypeDef HAL_UART_Receive(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len, uint32_t timeout);
+void HAL_NVIC_SetPriority(IRQn_Type IRQn, uint32_t preempt_priority, uint32_t sub_priority);
+void HAL_NVIC_EnableIRQ(IRQn_Type IRQn);
+void HAL_NVIC_DisableIRQ(IRQn_Type IRQn);
 
 #ifdef __cplusplus
 }

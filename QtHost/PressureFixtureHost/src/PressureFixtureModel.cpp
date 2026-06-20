@@ -59,6 +59,8 @@ QString stateName(RuntimeState state)
     case RuntimeState::Result: return "Result";
     case RuntimeState::Refill: return "Refill";
     case RuntimeState::Error: return "Error";
+    case RuntimeState::PcbaCurrentTest: return "PCBA current test";
+    case RuntimeState::RtcDebug: return "RTC debug";
     case RuntimeState::Count: break;
     }
     return "Unknown";
@@ -90,6 +92,8 @@ QString stateDisplayName(RuntimeState state)
     case RuntimeState::Result: return "结果显示";
     case RuntimeState::Refill: return "补气阶段";
     case RuntimeState::Error: return "错误停机";
+    case RuntimeState::PcbaCurrentTest: return "PCBA电流测试";
+    case RuntimeState::RtcDebug: return "RTC时钟调试模式";
     case RuntimeState::Count: break;
     }
     return "未知状态";
@@ -130,6 +134,9 @@ QString commandName(uint8_t command)
     case 0x08: return "SET_THRESHOLD";
     case 0x09: return "MANUAL_VALVE";
     case 0x0A: return "ENTER_MSC_REBOOT";
+    case 0x0B: return "SET_RTC_TIME";
+    case 0x0C: return "SET_PCBA_CURRENT_RANGE";
+    case 0x0D: return "CALIBRATE_ADC";
     case 0x7E: return "STATUS";
     case 0x7F: return "ACK";
     case 0x80: return "NAK";
@@ -147,101 +154,58 @@ int to001mmHg(double mmHg)
     return static_cast<int>(std::lround(mmHg * kPressureScale));
 }
 
-static void openAllChannelValves(FixtureSnapshot &snapshot)
+bool pressureSensorValid(const FixtureSnapshot &snapshot, int sensorIndex)
 {
-    for (const auto &channel : channelSpecs()) {
-        snapshot.valvesOpen[channel.valve] = true;
-    }
+    return sensorIndex >= 0 &&
+           sensorIndex < kPressureSensorCount &&
+           snapshot.pressureValid[sensorIndex];
 }
 
-static int targetForState(RuntimeState state)
+QString formatPressure001mmHg(int pressure001mmHg, bool valid, int precision, bool withUnit)
 {
-    switch (state) {
-    case RuntimeState::Cal50: return 50;
-    case RuntimeState::Cal150: return 150;
-    case RuntimeState::Cal250: return 250;
-    case RuntimeState::Test100: return 100;
-    case RuntimeState::Test200: return 200;
-    case RuntimeState::Test285: return 285;
-    default: return 0;
+    if (!valid) {
+        return "--";
     }
+
+    const QString value = QString::number(toMmHg(pressure001mmHg), 'f', precision);
+    return withUnit ? value + " mmHg" : value;
 }
 
-void applyStateOutputs(FixtureSnapshot &snapshot, RuntimeState state)
+QString sensorPressureText(const FixtureSnapshot &snapshot, int sensorIndex, int precision, bool withUnit)
 {
-    snapshot.state = state;
-    std::fill(snapshot.valvesOpen.begin(), snapshot.valvesOpen.end(), false);
+    if (sensorIndex < 0 || sensorIndex >= kPressureSensorCount) {
+        return "--";
+    }
+    return formatPressure001mmHg(snapshot.pressure001mmHg[sensorIndex],
+                                 pressureSensorValid(snapshot, sensorIndex),
+                                 precision,
+                                 withUnit);
+}
 
-    const auto &tanks = tankSpecs();
-    for (int i = 0; i < kTankCount; ++i) {
-        const int target = to001mmHg(tanks[i].targetMmHg);
-        if (snapshot.pressure001mmHg[i] <= 0) {
-            snapshot.pressure001mmHg[i] = target;
-        }
+QString formatCurrentUaX100(uint32_t currentUaX100, bool valid, int precision, bool withUnit)
+{
+    if (!valid) {
+        return "--";
     }
 
-    switch (state) {
-    case RuntimeState::InitTanks:
-    case RuntimeState::Refill:
-        for (const auto &tank : tanks) {
-            snapshot.valvesOpen[tank.inletValve] = true;
-        }
-        break;
-    case RuntimeState::Cal50:
-        snapshot.valvesOpen[2] = true;
-        openAllChannelValves(snapshot);
-        break;
-    case RuntimeState::Cal150:
-        snapshot.valvesOpen[4] = true;
-        openAllChannelValves(snapshot);
-        break;
-    case RuntimeState::Cal250:
-        snapshot.valvesOpen[6] = true;
-        openAllChannelValves(snapshot);
-        break;
-    case RuntimeState::Test100:
-        snapshot.valvesOpen[8] = true;
-        openAllChannelValves(snapshot);
-        break;
-    case RuntimeState::Test200:
-        snapshot.valvesOpen[10] = true;
-        openAllChannelValves(snapshot);
-        break;
-    case RuntimeState::Test285:
-        snapshot.valvesOpen[12] = true;
-        openAllChannelValves(snapshot);
-        break;
-    default:
-        break;
+    const int clampedPrecision = std::clamp(precision, 0, 2);
+    const uint32_t scale = clampedPrecision == 0 ? 100u : (clampedPrecision == 1 ? 10u : 1u);
+    const uint32_t rounded = currentUaX100 + (scale / 2u);
+    const double currentUa = (rounded / scale) * scale / 100.0;
+    const QString value = QString::number(currentUa, 'f', clampedPrecision);
+    return withUnit ? value + " uA" : value;
+}
+
+QString formatCurrentUaX100AsMa(uint32_t currentUaX100, bool valid, int precision, bool withUnit)
+{
+    if (!valid) {
+        return "--";
     }
 
-    const int stageTarget = targetForState(state);
-    for (int i = 0; i < kChannelCount; ++i) {
-        auto &channel = snapshot.channels[i];
-        if (state >= RuntimeState::PcbaWake && state <= RuntimeState::Result) {
-            channel.online = true;
-        }
-        if (state >= RuntimeState::LowPowerQuery) {
-            channel.lowPowerOk = true;
-        }
-        if (state >= RuntimeState::NormalPowerQuery) {
-            channel.normalPowerOk = true;
-        }
-        if (stageTarget > 0) {
-            const int fixturePressure = to001mmHg(stageTarget);
-            snapshot.pressure001mmHg[6 + i] = fixturePressure;
-            channel.fixturePressure001mmHg = fixturePressure;
-            if (state == RuntimeState::Test100 || state == RuntimeState::Test200 || state == RuntimeState::Test285) {
-                const int offset = ((i % 3) - 1) * 700;
-                channel.pressure001mmHg = fixturePressure + offset;
-                channel.error001mmHg = channel.pressure001mmHg - fixturePressure;
-                channel.pass = std::abs(channel.error001mmHg) <= to001mmHg(snapshot.thresholdMmHg);
-            }
-        } else if (state == RuntimeState::Ready || state == RuntimeState::AutoAirtightness || state == RuntimeState::Result) {
-            snapshot.pressure001mmHg[6 + i] = 0;
-            channel.fixturePressure001mmHg = 0;
-        }
-    }
+    const int clampedPrecision = std::clamp(precision, 0, 3);
+    const double currentMa = currentUaX100 / 100000.0;
+    const QString value = QString::number(currentMa, 'f', clampedPrecision);
+    return withUnit ? value + " mA" : value;
 }
 
 } // namespace fixture

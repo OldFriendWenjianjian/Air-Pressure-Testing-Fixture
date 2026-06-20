@@ -35,10 +35,12 @@ int LT768_PortInit(void)
 
 void LT768_Reset(void)
 {
-    HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_RESET);
-    HAL_Delay(20u);
     HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_SET);
-    HAL_Delay(120u);
+    HAL_Delay(10u);
+    HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_RESET);
+    HAL_Delay(100u);
+    HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_SET);
+    HAL_Delay(200u);
 }
 
 void LT768_WriteCommand(uint8_t cmd)

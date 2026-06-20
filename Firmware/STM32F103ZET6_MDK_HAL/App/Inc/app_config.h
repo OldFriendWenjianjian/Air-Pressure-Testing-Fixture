@@ -8,7 +8,16 @@
 #define APP_TANK_COUNT                      6u
 
 #define APP_PCBA_UART_BAUDRATE              115200u
+#define APP_PC_LINK_JLINK_UART8_ENABLED     0u
+#define APP_PC_LINK_JLINK_RTT_ENABLED       1u
+#define APP_PC_LINK_BRINGUP_ONLY_ENABLED    0u
+#define APP_PC_LINK_UART_BAUDRATE           9600u
+#define APP_PC_LINK_STATUS_PERIOD_MS        1000u
 #define APP_KEY1_HOLD_TO_MSC_MS             1500u
+#define APP_VALVE1_0_1HZ_TEST_ENABLED       0u
+#define APP_VALVE1_TEST_HALF_PERIOD_MS      5000u
+#define APP_LT768_COLOR_BAR_TEST_ENABLED    0u
+#define APP_LT768_FRAMEBUFFER_TEST_ENABLED  0u
 
 #define APP_PRESSURE_SCALE_PER_MMHG         1000u
 #define APP_PRESSURE_50_MMHG                (50u * APP_PRESSURE_SCALE_PER_MMHG)
@@ -31,6 +40,7 @@
 #define APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS   2000u
 #define APP_PCBA_STANDBY_CURRENT_CHECK_MS   1000u
 #define APP_PCBA_WORK_CURRENT_MEASURE_MS    0u
+#define APP_PCBA_CURRENT_TEST_PERIOD_MS     250u
 #define APP_PCBA_POWER_SWITCH_DELAY_MS      500u
 #define APP_STAGE_SETTLE_TIMEOUT_MS         30000u
 #define APP_RESULT_CONFIRM_KEY_DEBOUNCE_MS  50u
@@ -38,7 +48,10 @@
 #define APP_CURRENT_ADC_VREF_MV             3300u
 #define APP_PCBA_CURRENT_AMP_GAIN           100u
 #define APP_PCBA_STANDBY_SHUNT_MOHM         1000000u
-#define APP_PCBA_WORK_SHUNT_MOHM            200u
+/* PB1 high enables the shared low-resistance current-sense branch for all 8 PCBA channels. */
+#define APP_PCBA_50MA_SHUNT_MOHM            200u
+/* 0.2R is in series with the shared 2300N NMOS; update Rds(on) from the actual BOM datasheet. */
+#define APP_PCBA_50MA_NMOS_RDS_ON_MOHM      85u
 #define APP_PCBA_STANDBY_CURRENT_MAX_UA     0u
 #define APP_PCBA_WORK_CURRENT_MIN_UA        0u
 #define APP_PCBA_WORK_CURRENT_MAX_UA        0u

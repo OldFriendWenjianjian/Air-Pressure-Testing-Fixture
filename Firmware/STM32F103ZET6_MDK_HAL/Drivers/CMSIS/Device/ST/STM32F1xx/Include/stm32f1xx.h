@@ -16,7 +16,17 @@ typedef enum {
     SVCall_IRQn         = -5,
     DebugMonitor_IRQn   = -4,
     PendSV_IRQn         = -2,
-    SysTick_IRQn        = -1
+    SysTick_IRQn        = -1,
+    EXTI0_IRQn          = 6,
+    EXTI1_IRQn          = 7,
+    EXTI2_IRQn          = 8,
+    EXTI3_IRQn          = 9,
+    EXTI4_IRQn          = 10,
+    USB_HP_CAN1_TX_IRQn = 19,
+    USB_LP_CAN1_RX0_IRQn = 20,
+    EXTI9_5_IRQn        = 23,
+    EXTI15_10_IRQn      = 40,
+    USBWakeUp_IRQn      = 42
 } IRQn_Type;
 
 #define __CM3_REV                 0x0200U
@@ -43,6 +53,15 @@ typedef struct {
     uint32_t RESERVED0;
     __IO uint32_t MAPR2;
 } AFIO_TypeDef;
+
+typedef struct {
+    __IO uint32_t IMR;
+    __IO uint32_t EMR;
+    __IO uint32_t RTSR;
+    __IO uint32_t FTSR;
+    __IO uint32_t SWIER;
+    __IO uint32_t PR;
+} EXTI_TypeDef;
 
 typedef struct {
     __IO uint32_t CR;
@@ -93,6 +112,63 @@ typedef struct {
 } ADC_TypeDef;
 
 typedef struct {
+    __IO uint16_t CRH;
+    uint16_t RESERVED0;
+    __IO uint16_t CRL;
+    uint16_t RESERVED1;
+    __IO uint16_t PRLH;
+    uint16_t RESERVED2;
+    __IO uint16_t PRLL;
+    uint16_t RESERVED3;
+    __IO uint16_t DIVH;
+    uint16_t RESERVED4;
+    __IO uint16_t DIVL;
+    uint16_t RESERVED5;
+    __IO uint16_t CNTH;
+    uint16_t RESERVED6;
+    __IO uint16_t CNTL;
+    uint16_t RESERVED7;
+    __IO uint16_t ALRH;
+    uint16_t RESERVED8;
+    __IO uint16_t ALRL;
+    uint16_t RESERVED9;
+} RTC_TypeDef;
+
+typedef struct {
+    __IO uint16_t DR1;
+    uint16_t RESERVED0;
+    __IO uint16_t DR2;
+    uint16_t RESERVED1;
+    __IO uint16_t DR3;
+    uint16_t RESERVED2;
+    __IO uint16_t DR4;
+    uint16_t RESERVED3;
+    __IO uint16_t DR5;
+    uint16_t RESERVED4;
+    __IO uint16_t DR6;
+    uint16_t RESERVED5;
+    __IO uint16_t DR7;
+    uint16_t RESERVED6;
+    __IO uint16_t DR8;
+    uint16_t RESERVED7;
+    __IO uint16_t DR9;
+    uint16_t RESERVED8;
+    __IO uint16_t DR10;
+    uint16_t RESERVED9;
+    __IO uint16_t RTCCR;
+    uint16_t RESERVED10;
+    __IO uint16_t CR;
+    uint16_t RESERVED11;
+    __IO uint16_t CSR;
+    uint16_t RESERVED12;
+} BKP_TypeDef;
+
+typedef struct {
+    __IO uint32_t CR;
+    __IO uint32_t CSR;
+} PWR_TypeDef;
+
+typedef struct {
     __IO uint32_t CR1;
     __IO uint32_t CR2;
     __IO uint32_t SR;
@@ -114,7 +190,38 @@ typedef struct {
     __IO uint32_t GTPR;
 } USART_TypeDef;
 
+typedef struct {
+    __IO uint16_t EP0R;
+    uint16_t RESERVED0;
+    __IO uint16_t EP1R;
+    uint16_t RESERVED1;
+    __IO uint16_t EP2R;
+    uint16_t RESERVED2;
+    __IO uint16_t EP3R;
+    uint16_t RESERVED3;
+    __IO uint16_t EP4R;
+    uint16_t RESERVED4;
+    __IO uint16_t EP5R;
+    uint16_t RESERVED5;
+    __IO uint16_t EP6R;
+    uint16_t RESERVED6;
+    __IO uint16_t EP7R;
+    uint16_t RESERVED7;
+    uint16_t RESERVED8[16];
+    __IO uint16_t CNTR;
+    uint16_t RESERVED9;
+    __IO uint16_t ISTR;
+    uint16_t RESERVED10;
+    __IO uint16_t FNR;
+    uint16_t RESERVED11;
+    __IO uint16_t DADDR;
+    uint16_t RESERVED12;
+    __IO uint16_t BTABLE;
+    uint16_t RESERVED13;
+} USB_TypeDef;
+
 #define AFIO_BASE                 0x40010000UL
+#define EXTI_BASE                 0x40010400UL
 #define GPIOA_BASE                0x40010800UL
 #define GPIOB_BASE                0x40010C00UL
 #define GPIOC_BASE                0x40011000UL
@@ -125,15 +232,20 @@ typedef struct {
 #define ADC1_BASE                 0x40012400UL
 #define SPI2_BASE                 0x40003800UL
 #define SPI3_BASE                 0x40003C00UL
+#define RTC_BASE                  0x40002800UL
 #define USART1_BASE               0x40013800UL
 #define USART2_BASE               0x40004400UL
 #define USART3_BASE               0x40004800UL
 #define UART4_BASE                0x40004C00UL
 #define UART5_BASE                0x40005000UL
+#define USB_BASE                  0x40005C00UL
+#define BKP_BASE                  0x40006C00UL
+#define PWR_BASE                  0x40007000UL
 #define RCC_BASE                  0x40021000UL
 #define FLASH_R_BASE              0x40022000UL
 
 #define AFIO                      ((AFIO_TypeDef *)AFIO_BASE)
+#define EXTI                      ((EXTI_TypeDef *)EXTI_BASE)
 #define GPIOA                     ((GPIO_TypeDef *)GPIOA_BASE)
 #define GPIOB                     ((GPIO_TypeDef *)GPIOB_BASE)
 #define GPIOC                     ((GPIO_TypeDef *)GPIOC_BASE)
@@ -142,6 +254,7 @@ typedef struct {
 #define GPIOF                     ((GPIO_TypeDef *)GPIOF_BASE)
 #define GPIOG                     ((GPIO_TypeDef *)GPIOG_BASE)
 #define ADC1                      ((ADC_TypeDef *)ADC1_BASE)
+#define RTC                       ((RTC_TypeDef *)RTC_BASE)
 #define SPI2                      ((SPI_TypeDef *)SPI2_BASE)
 #define SPI3                      ((SPI_TypeDef *)SPI3_BASE)
 #define USART1                    ((USART_TypeDef *)USART1_BASE)
@@ -149,6 +262,9 @@ typedef struct {
 #define USART3                    ((USART_TypeDef *)USART3_BASE)
 #define UART4                     ((USART_TypeDef *)UART4_BASE)
 #define UART5                     ((USART_TypeDef *)UART5_BASE)
+#define USB                       ((USB_TypeDef *)USB_BASE)
+#define BKP                       ((BKP_TypeDef *)BKP_BASE)
+#define PWR                       ((PWR_TypeDef *)PWR_BASE)
 #define RCC                       ((RCC_TypeDef *)RCC_BASE)
 #define FLASH                     ((FLASH_TypeDef *)FLASH_R_BASE)
 
