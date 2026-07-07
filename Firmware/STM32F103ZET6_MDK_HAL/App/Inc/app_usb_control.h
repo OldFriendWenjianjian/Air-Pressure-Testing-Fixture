@@ -10,13 +10,13 @@
 #define USB_CTRL_FRAME_HEAD0                    0xA5u
 #define USB_CTRL_FRAME_HEAD1                    0x5Au
 #define USB_CTRL_PROTOCOL_VERSION               0x01u
-#define USB_CTRL_MAX_PAYLOAD                    256u
+#define USB_CTRL_MAX_PAYLOAD                    1024u
 #define USB_CTRL_MIN_FRAME_SIZE                 11u
 #define USB_CTRL_MAX_FRAME_SIZE                 (USB_CTRL_MIN_FRAME_SIZE + USB_CTRL_MAX_PAYLOAD)
 #define USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG     285u
 #define USB_CTRL_PRESSURE_SENSOR_COUNT          14u
 #define USB_CTRL_PCBA_CHANNEL_COUNT             8u
-#define USB_CTRL_STATUS_SNAPSHOT_LEN            224u
+#define USB_CTRL_STATUS_SNAPSHOT_LEN            252u
 
 typedef enum {
     USB_CTRL_FRAME_REQUEST  = 0x01u,
@@ -38,6 +38,13 @@ typedef enum {
     USB_CTRL_CMD_SET_RTC_TIME      = 0x0Bu,
     USB_CTRL_CMD_SET_PCBA_CURRENT_RANGE = 0x0Cu,
     USB_CTRL_CMD_CALIBRATE_ADC     = 0x0Du,
+    USB_CTRL_CMD_SET_VALVE_MASK    = 0x0Eu,
+    USB_CTRL_CMD_SINGLE_TANK_LOOP  = 0x0Fu,
+    USB_CTRL_CMD_RUN_PCBA_TIMING   = 0x10u,
+    USB_CTRL_CMD_GET_PCBA_TIMING   = 0x11u,
+    USB_CTRL_CMD_RUN_SINGLE_TANK_PCBA = 0x12u,
+    USB_CTRL_CMD_GET_SINGLE_TANK_PCBA = 0x13u,
+    USB_CTRL_CMD_SET_PCBA_SUPPLY_VOLTAGE = 0x14u,
     USB_CTRL_CMD_STATUS_SNAPSHOT   = 0x7Eu,
     USB_CTRL_CMD_ACK               = 0x7Fu,
     USB_CTRL_CMD_NAK               = 0x80u
@@ -63,7 +70,8 @@ typedef enum {
     USB_CTRL_WORKFLOW_RUNNING = 0x01u,
     USB_CTRL_WORKFLOW_PAUSED  = 0x02u,
     USB_CTRL_WORKFLOW_ERROR   = 0x04u,
-    USB_CTRL_WORKFLOW_MANUAL  = 0x08u
+    USB_CTRL_WORKFLOW_MANUAL  = 0x08u,
+    USB_CTRL_WORKFLOW_SINGLE_PCBA = 0x10u
 } UsbCtrlWorkflowFlag;
 
 typedef enum {
@@ -115,7 +123,11 @@ typedef struct {
     uint16_t adc_vdda_mv;
     uint32_t adc_scale_ppm;
     uint8_t adc_calibration_flags;
+    uint16_t pressure_fault_latched_mask;
+    uint8_t pcba_power_flags;
     uint16_t pcba_current_raw_adc[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint8_t pressure_status_byte[USB_CTRL_PRESSURE_SENSOR_COUNT];
+    uint8_t pressure_fault_code[USB_CTRL_PRESSURE_SENSOR_COUNT];
 } UsbCtrlStatusSnapshot;
 
 uint16_t UsbCtrl_Crc16Modbus(const uint8_t *data, size_t len);

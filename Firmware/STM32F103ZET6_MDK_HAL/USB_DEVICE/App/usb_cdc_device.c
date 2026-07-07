@@ -85,7 +85,7 @@
 #define CDC_SET_CONTROL_LINE_STATE       0x22u
 
 #define USB_RX_RING_SIZE                 512u
-#define USB_TX_RING_SIZE                 512u
+#define USB_TX_RING_SIZE                 2048u
 
 typedef struct {
     uint8_t bmRequestType;
@@ -129,6 +129,32 @@ typedef struct {
 } UsbCdcContext;
 
 static UsbCdcContext s_usb_cdc;
+volatile uint32_t g_usb_cdc_diag[16];
+
+static void usb_force_reenumeration_pulse(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /*
+     * Force a short D+ low pulse before enabling the USB peripheral so the host
+     * drops any stale VCP instance and performs a fresh enumeration.
+     * This is especially helpful after SWD reflash / SYSRESETREQ where the board
+     * may reboot faster than Windows updates the old COM handle state.
+     */
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+    gpio.Pin = GPIO_PIN_12;
+    gpio.Mode = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &gpio);
+    HAL_Delay(30u);
+
+    gpio.Mode = GPIO_MODE_INPUT;
+    HAL_GPIO_Init(GPIOA, &gpio);
+    HAL_Delay(30u);
+}
 
 static const uint8_t s_device_descriptor[] = {
     0x12, USB_DESC_TYPE_DEVICE,
@@ -274,7 +300,11 @@ static void pma_read(uint8_t *dst, uint16_t pma_addr, uint16_t len)
 static uint16_t rx_count_value(uint16_t len)
 {
     if (len > 62u) {
-        return (uint16_t)(0x8000u | (((len + 31u) / 32u) << 10));
+        uint16_t blocks = (uint16_t)(len / 32u);
+        if ((len % 32u) == 0u) {
+            blocks--;
+        }
+        return (uint16_t)(0x8000u | (blocks << 10));
     }
     return (uint16_t)(((len + 1u) / 2u) << 10);
 }
@@ -520,6 +550,8 @@ static void handle_standard_request(const UsbSetupPacket *setup)
         }
         s_usb_cdc.configuration = (uint8_t)setup->wValue;
         s_usb_cdc.configured = s_usb_cdc.configuration != 0u ? 1u : 0u;
+        g_usb_cdc_diag[2]++;
+        g_usb_cdc_diag[3] = s_usb_cdc.configuration;
         ep0_status_in();
         return;
 
@@ -548,6 +580,8 @@ static void handle_standard_request(const UsbSetupPacket *setup)
 
 static void handle_class_request(const UsbSetupPacket *setup)
 {
+    g_usb_cdc_diag[4]++;
+    g_usb_cdc_diag[5] = setup->bRequest;
     switch (setup->bRequest) {
     case CDC_SET_LINE_CODING:
         if (setup->wLength != sizeof(s_usb_cdc.line_coding)) {
@@ -578,6 +612,7 @@ static void handle_setup(void)
     uint8_t setup_raw[8];
     UsbSetupPacket setup;
 
+    g_usb_cdc_diag[6]++;
     pma_read(setup_raw, PMA_EP0_RX, sizeof(setup_raw));
     parse_setup(setup_raw, &setup);
 
@@ -687,10 +722,13 @@ static void handle_ctr(void)
             } else if (ep == CDC_DATA_OUT_EP) {
                 uint8_t packet[CDC_DATA_EP_SIZE];
                 uint16_t count = pma_get_rx_count(CDC_DATA_OUT_EP);
+                g_usb_cdc_diag[7]++;
+                g_usb_cdc_diag[8] = count;
                 if (count > sizeof(packet)) {
                     count = sizeof(packet);
                 }
                 pma_read(packet, PMA_CDC_OUT, count);
+                g_usb_cdc_diag[9] = count > 0u ? packet[0] : 0u;
                 push_rx_bytes(packet, count);
                 pma_set_rx(CDC_DATA_OUT_EP, PMA_CDC_OUT, CDC_DATA_EP_SIZE);
                 ep_write_status(CDC_DATA_OUT_EP, USB_EP_STAT_RX, USB_EP_RX_VALID);
@@ -714,6 +752,8 @@ static void handle_ctr(void)
 int UsbCdcControl_Start(void)
 {
     memset(&s_usb_cdc, 0, sizeof(s_usb_cdc));
+    memset((void *)g_usb_cdc_diag, 0, sizeof(g_usb_cdc_diag));
+    g_usb_cdc_diag[0] = 0xCDC00001u;
     s_usb_cdc.active = 1u;
     s_usb_cdc.line_coding[0] = 0x00u;
     s_usb_cdc.line_coding[1] = 0xC2u;
@@ -722,6 +762,8 @@ int UsbCdcControl_Start(void)
     s_usb_cdc.line_coding[4] = 0x00u;
     s_usb_cdc.line_coding[5] = 0x00u;
     s_usb_cdc.line_coding[6] = 0x08u;
+
+    usb_force_reenumeration_pulse();
 
     __HAL_RCC_USB_FORCE_RESET();
     HAL_Delay(1u);
@@ -758,6 +800,12 @@ int UsbCdcControl_Read(uint8_t *data, uint16_t max_len)
         s_usb_cdc.rx_tail = (uint16_t)((s_usb_cdc.rx_tail + 1u) % USB_RX_RING_SIZE);
     }
     __enable_irq();
+
+    if (count > 0u) {
+        g_usb_cdc_diag[10]++;
+        g_usb_cdc_diag[11] = count;
+        g_usb_cdc_diag[12] = data[0];
+    }
 
     return (int)count;
 }
@@ -805,12 +853,13 @@ void UsbCdcDevice_IrqHandler(void)
         return;
     }
 
-    while (((istr = USB->ISTR) & USB_ISTR_CTR) != 0u) {
+    while (((istr = USB->ISTR) & (USB_ISTR_CTR | USB_ISTR_RESET)) != 0u) {
+        if ((istr & USB_ISTR_RESET) != 0u) {
+            g_usb_cdc_diag[1]++;
+            USB->ISTR = (uint16_t)~USB_ISTR_RESET;
+            usb_reset();
+            continue;
+        }
         handle_ctr();
-    }
-
-    if ((istr & USB_ISTR_RESET) != 0u) {
-        USB->ISTR = (uint16_t)~USB_ISTR_RESET;
-        usb_reset();
     }
 }

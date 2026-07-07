@@ -137,7 +137,7 @@ void ArchitectureView::paintEvent(QPaintEvent *event)
 
     drawBox(painter, {1780, 145, 600, 150},
             "主控板 / PC 控制\n状态: " + stateDisplayName(m_snapshot.state) +
-                QString("\n链路: %1").arg(m_snapshot.linkMode == LinkMode::UsbCdc ? "SEGGER RTT" : "未连接"),
+                QString("\n链路: %1").arg(m_snapshot.linkMode == LinkMode::UsbCdc ? "USB CDC" : "未连接"),
             QColor("#ecfdf5"), QColor("#0f766e"), m_snapshot.remoteControlEnabled);
 }
 
@@ -213,6 +213,9 @@ QColor ArchitectureView::valveColor(int valve) const
 
 QColor ArchitectureView::tankColor(int tankIndex) const
 {
+    if (pressureSensorFaultLatched(m_snapshot, tankIndex)) {
+        return QColor("#fecaca");
+    }
     if (!pressureSensorValid(m_snapshot, tankIndex)) {
         return QColor("#f1f5f9");
     }
@@ -298,9 +301,12 @@ void ArchitectureView::drawTank(QPainter &painter, int index, const QRectF &rect
 void ArchitectureView::drawSensor(QPainter &painter, int sensorNumber, const QRectF &rect) const
 {
     const int index = sensorNumber - 1;
+    const bool faultLatched = pressureSensorFaultLatched(m_snapshot, index);
     drawBox(painter, rect,
             QString("压力检测%1\n%2").arg(sensorNumber).arg(sensorPressureText(m_snapshot, index, 1, true)),
-            QColor("#fff7ed"), QColor("#ea580c"), false, 17.0);
+            faultLatched ? QColor("#fee2e2") : QColor("#fff7ed"),
+            faultLatched ? QColor("#b91c1c") : QColor("#ea580c"),
+            faultLatched, 17.0);
 }
 
 void ArchitectureView::drawChannel(QPainter &painter, int channelIndex, const QRectF &rect) const
@@ -368,9 +374,10 @@ QString ArchitectureView::tooltipForKey(const QString &key) const
             .arg(sensorPressureText(m_snapshot, number, 1, true));
     }
     if (parts[0] == "sensor") {
-        return QString("压力检测%1: %2")
+        return QString("压力检测%1: %2%3")
             .arg(number)
-            .arg(sensorPressureText(m_snapshot, number - 1, 1, true));
+            .arg(sensorPressureText(m_snapshot, number - 1, 1, true))
+            .arg(pressureSensorFaultLatched(m_snapshot, number - 1) ? "\n状态: 故障锁定，需重新上电" : "");
     }
     if (parts[0] == "channel") {
         const auto &channel = m_snapshot.channels[number];

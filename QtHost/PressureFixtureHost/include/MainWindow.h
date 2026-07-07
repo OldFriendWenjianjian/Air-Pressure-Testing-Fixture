@@ -79,7 +79,12 @@ private slots:
     void stopSingleTankLoop();
     void serviceSingleTankLoop();
     void enterPcbaCurrentTest();
+    void startSinglePcbaFlow();
+    void requestSinglePcbaTimingReport();
+    void startSingleTankPcbaFlow();
+    void requestSingleTankPcbaReport();
     void setPcbaCurrent50mAEnabled(bool enabled);
+    void handlePcbaSupplyVoltageChanged(int index);
     void sendAdcCalibration();
     void setRtcEditorToComputerTime();
     void sendRtcTime();
@@ -101,6 +106,8 @@ private:
     enum class DebugTool {
         UsbMsc = 0,
         PcbaCurrent,
+        SinglePcbaFlow,
+        SingleTankPcba,
         SingleTank,
         ManualValve,
         AdcReference,
@@ -121,12 +128,21 @@ private:
     bool activateSelectedLeftItem();
     bool sendFrame(const QByteArray &frame, const QString &description);
     bool sendManualValveCommand(int valveNumber, bool open, const QString &description);
-    void resetSingleTankCommandCache();
-    void commandSingleTankValve(int valveNumber, bool open, const QString &reason, bool force = false);
-    void closeSingleTankValves(const fixture::TankSpec &tank, const QString &reason, bool force = false);
+    bool sendValveMaskCommand(uint32_t valveMask, uint32_t openMask, const QString &description);
+    void resetSingleTankLoopControl();
+    bool sendSingleTankLoopCommand(uint8_t tankIndex,
+                                   double targetMmHg,
+                                   double toleranceMmHg,
+                                   bool enable,
+                                   const QString &description);
+    void resetConnectAttempts();
+    void buildConnectCandidates(const QString &selectedPortName);
+    bool tryOpenNextConnectCandidate();
     uint16_t nextSequence();
     void appendLog(const QString &line);
     void updateTables();
+    void updateSinglePcbaTimingTable();
+    void updateSingleTankPcbaTable();
     void refreshStatusTablesVisibility();
     void updateFlowList();
     void updateCalibrationDialog();
@@ -148,6 +164,8 @@ private:
     QPushButton *m_debugModeButton = nullptr;
     QGroupBox *m_productionBox = nullptr;
     QGroupBox *m_debugFlowBox = nullptr;
+    QGroupBox *m_debugSinglePcbaBox = nullptr;
+    QGroupBox *m_debugSingleTankPcbaBox = nullptr;
     QGroupBox *m_debugSingleTankBox = nullptr;
     QGroupBox *m_debugManualBox = nullptr;
     QGroupBox *m_debugCurrentBox = nullptr;
@@ -160,6 +178,15 @@ private:
     QPushButton *m_singleTankStartButton = nullptr;
     QPushButton *m_singleTankStopButton = nullptr;
     QLabel *m_singleTankStatusLabel = nullptr;
+    QLabel *m_singlePcbaStatusLabel = nullptr;
+    QLabel *m_singlePcbaSummaryLabel = nullptr;
+    QCheckBox *m_singlePcbaStopOnFailCheck = nullptr;
+    QTableWidget *m_singlePcbaCommandTable = nullptr;
+    QPlainTextEdit *m_singlePcbaSerialLog = nullptr;
+    QLabel *m_singleTankPcbaStatusLabel = nullptr;
+    QLabel *m_singleTankPcbaSummaryLabel = nullptr;
+    QTableWidget *m_singleTankPcbaTable = nullptr;
+    QPlainTextEdit *m_singleTankPcbaSerialLog = nullptr;
     QDoubleSpinBox *m_thresholdSpin = nullptr;
     QSpinBox *m_valveSpin = nullptr;
     QComboBox *m_valveActionCombo = nullptr;
@@ -168,6 +195,7 @@ private:
     QTableWidget *m_pcbaTable = nullptr;
     QTableWidget *m_pcbaCurrentTable = nullptr;
     QCheckBox *m_pcbaCurrent50mACheck = nullptr;
+    QComboBox *m_pcbaSupplyVoltageCombo = nullptr;
     QLabel *m_pcbaCurrentStatusLabel = nullptr;
     QLabel *m_adcReferenceStatusLabel = nullptr;
     QLabel *m_adcReferenceVddaLabel = nullptr;
@@ -189,7 +217,10 @@ private:
     QProcess m_firmwareProcess;
     QTimer m_handshakeTimer;
     QTimer m_singleTankTimer;
+    QTimer m_singlePcbaTimingPollTimer;
+    QTimer m_singleTankPcbaPollTimer;
     QByteArray m_rxBuffer;
+    int m_rxDiscardBurstCount = 0;
     fixture::FixtureSnapshot m_snapshot;
     uint16_t m_sequence = 1;
     bool m_waitingForHello = false;
@@ -197,6 +228,18 @@ private:
     bool m_firmwareDownloadSawError = false;
     QString m_firmwareCommandFile;
     bool m_singleTankRunning = false;
-    std::array<bool, fixture::kValveCount + 1> m_singleTankCommandKnown{};
-    std::array<bool, fixture::kValveCount + 1> m_singleTankCommandOpen{};
+    QStringList m_connectCandidatePorts;
+    QStringList m_connectCandidateDisplays;
+    QStringList m_deferredConnectPorts;
+    QStringList m_deferredConnectDisplays;
+    int m_connectCandidateIndex = -1;
+    int m_connectDeferredRound = 0;
+    int m_helloRetryCount = 0;
+    bool m_singleTankAwaitingReady = false;
+    bool m_singlePcbaStartPending = false;
+    bool m_singlePcbaTimingRunning = false;
+    fixture::PcbaTimingReport m_singlePcbaTimingReport;
+    bool m_singleTankPcbaStartPending = false;
+    bool m_singleTankPcbaRunning = false;
+    fixture::SingleTankPcbaReport m_singleTankPcbaReport;
 };

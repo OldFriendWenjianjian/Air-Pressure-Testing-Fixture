@@ -252,7 +252,11 @@ static void pma_read(uint8_t *dst, uint16_t pma_addr, uint16_t len)
 static uint16_t rx_count_value(uint16_t len)
 {
     if (len > 62u) {
-        return (uint16_t)(0x8000u | (((len + 31u) / 32u) << 10));
+        uint16_t blocks = (uint16_t)(len / 32u);
+        if ((len % 32u) == 0u) {
+            blocks--;
+        }
+        return (uint16_t)(0x8000u | (blocks << 10));
     }
     return (uint16_t)(((len + 1u) / 2u) << 10);
 }
@@ -941,12 +945,12 @@ void UsbMscDevice_IrqHandler(void)
         return;
     }
 
-    while (((istr = USB->ISTR) & USB_ISTR_CTR) != 0u) {
+    while (((istr = USB->ISTR) & (USB_ISTR_CTR | USB_ISTR_RESET)) != 0u) {
+        if ((istr & USB_ISTR_RESET) != 0u) {
+            USB->ISTR = (uint16_t)~USB_ISTR_RESET;
+            usb_reset();
+            continue;
+        }
         handle_ctr();
-    }
-
-    if ((istr & USB_ISTR_RESET) != 0u) {
-        USB->ISTR = (uint16_t)~USB_ISTR_RESET;
-        usb_reset();
     }
 }

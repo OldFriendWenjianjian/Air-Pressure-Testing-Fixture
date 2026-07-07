@@ -5,6 +5,19 @@
 
 namespace fixture {
 
+namespace {
+
+QString formatStatusByte(uint8_t statusByte)
+{
+    if (statusByte == 0u) {
+        return {};
+    }
+    return QStringLiteral(" (0x%1)")
+        .arg(QStringLiteral("%1").arg(statusByte, 2, 16, QLatin1Char('0')).toUpper());
+}
+
+} // namespace
+
 const std::array<TankSpec, kTankCount> &tankSpecs()
 {
     static const std::array<TankSpec, kTankCount> specs{{
@@ -61,6 +74,12 @@ QString stateName(RuntimeState state)
     case RuntimeState::Error: return "Error";
     case RuntimeState::PcbaCurrentTest: return "PCBA current test";
     case RuntimeState::RtcDebug: return "RTC debug";
+    case RuntimeState::PcbaTimingDiagnostic: return "PCBA timing diagnostic";
+    case RuntimeState::SingleTankPcbaDiagnostic: return "Single tank PCBA diagnostic";
+    case RuntimeState::SingleTankLoop: return "Single tank loop";
+    case RuntimeState::SinglePcbaFlow: return "Single PCBA flow";
+    case RuntimeState::PcbaPressureQuery: return "PCBA pressure query";
+    case RuntimeState::PcbaWriteFlash: return "PCBA write flash";
     case RuntimeState::Count: break;
     }
     return "Unknown";
@@ -94,6 +113,12 @@ QString stateDisplayName(RuntimeState state)
     case RuntimeState::Error: return "错误停机";
     case RuntimeState::PcbaCurrentTest: return "PCBA电流测试";
     case RuntimeState::RtcDebug: return "RTC时钟调试模式";
+    case RuntimeState::PcbaTimingDiagnostic: return "单PCBA指令诊断";
+    case RuntimeState::SingleTankPcbaDiagnostic: return "单罐单PCBA测试";
+    case RuntimeState::SingleTankLoop: return "单罐闭环";
+    case RuntimeState::SinglePcbaFlow: return "单PCBA全流程测试";
+    case RuntimeState::PcbaPressureQuery: return "PCBA压力查询";
+    case RuntimeState::PcbaWriteFlash: return "PCBA写入Flash";
     case RuntimeState::Count: break;
     }
     return "未知状态";
@@ -137,6 +162,13 @@ QString commandName(uint8_t command)
     case 0x0B: return "SET_RTC_TIME";
     case 0x0C: return "SET_PCBA_CURRENT_RANGE";
     case 0x0D: return "CALIBRATE_ADC";
+    case 0x0E: return "SET_VALVE_MASK";
+    case 0x0F: return "SINGLE_TANK_LOOP";
+    case 0x10: return "RUN_PCBA_TIMING";
+    case 0x11: return "GET_PCBA_TIMING";
+    case 0x12: return "RUN_SINGLE_TANK_PCBA";
+    case 0x13: return "GET_SINGLE_TANK_PCBA";
+    case 0x14: return "SET_PCBA_SUPPLY_VOLTAGE";
     case 0x7E: return "STATUS";
     case 0x7F: return "ACK";
     case 0x80: return "NAK";
@@ -161,6 +193,48 @@ bool pressureSensorValid(const FixtureSnapshot &snapshot, int sensorIndex)
            snapshot.pressureValid[sensorIndex];
 }
 
+bool pressureSensorFaultLatched(const FixtureSnapshot &snapshot, int sensorIndex)
+{
+    return sensorIndex >= 0 &&
+           sensorIndex < kPressureSensorCount &&
+           snapshot.pressureFaultLatched[sensorIndex];
+}
+
+QString pressureSensorFaultReasonText(const FixtureSnapshot &snapshot, int sensorIndex)
+{
+    if (sensorIndex < 0 || sensorIndex >= kPressureSensorCount) {
+        return {};
+    }
+
+    const uint8_t statusByte = snapshot.pressureStatusByte[sensorIndex];
+    switch (snapshot.pressureFaultCode[sensorIndex]) {
+    case 0x00:
+        return {};
+    case 0x01:
+        return QStringLiteral("测量命令发送失败");
+    case 0x02:
+        return QStringLiteral("测量结果读取失败");
+    case 0x03:
+        return QStringLiteral("传感器未上电%1").arg(formatStatusByte(statusByte));
+    case 0x04:
+        return QStringLiteral("转换忙超时%1").arg(formatStatusByte(statusByte));
+    case 0x05:
+        return QStringLiteral("内部存储校验失败%1").arg(formatStatusByte(statusByte));
+    case 0x06:
+        return QStringLiteral("数学饱和%1").arg(formatStatusByte(statusByte));
+    case 0x07:
+        return statusByte == 0u
+            ? QStringLiteral("状态异常")
+            : QStringLiteral("状态异常%1").arg(formatStatusByte(statusByte));
+    default:
+        return statusByte == 0u
+            ? QStringLiteral("未知故障码 %1").arg(snapshot.pressureFaultCode[sensorIndex])
+            : QStringLiteral("未知故障码 %1%2")
+                  .arg(snapshot.pressureFaultCode[sensorIndex])
+                  .arg(formatStatusByte(statusByte));
+    }
+}
+
 QString formatPressure001mmHg(int pressure001mmHg, bool valid, int precision, bool withUnit)
 {
     if (!valid) {
@@ -176,6 +250,18 @@ QString sensorPressureText(const FixtureSnapshot &snapshot, int sensorIndex, int
     if (sensorIndex < 0 || sensorIndex >= kPressureSensorCount) {
         return "--";
     }
+    if (pressureSensorFaultLatched(snapshot, sensorIndex)) {
+        const QString reason = pressureSensorFaultReasonText(snapshot, sensorIndex);
+        return reason.isEmpty() ? QStringLiteral("故障锁定")
+                                : QStringLiteral("故障锁定 | %1").arg(reason);
+    }
+
+    const QString reason = pressureSensorFaultReasonText(snapshot, sensorIndex);
+    if (!pressureSensorValid(snapshot, sensorIndex)) {
+        return reason.isEmpty() ? QStringLiteral("--")
+                                : QStringLiteral("无有效读数 | %1").arg(reason);
+    }
+
     return formatPressure001mmHg(snapshot.pressure001mmHg[sensorIndex],
                                  pressureSensorValid(snapshot, sensorIndex),
                                  precision,

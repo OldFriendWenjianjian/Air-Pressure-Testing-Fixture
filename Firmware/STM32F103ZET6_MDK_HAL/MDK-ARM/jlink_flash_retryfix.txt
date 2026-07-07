@@ -1,0 +1,7 @@
+r
+h
+erase
+loadfile "C:/Users/a1258/Documents/气压检测工装（STM32方案）/Firmware/STM32F103ZET6_MDK_HAL/MDK-ARM/Objects/PressureFixture_STM32F103ZET6.hex"
+r
+g
+exit

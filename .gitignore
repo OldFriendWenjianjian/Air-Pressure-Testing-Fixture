@@ -32,6 +32,14 @@ __pycache__/
 *.swp
 Thumbs.db
 .DS_Store
+.vs/
+**/.vs/
 
 # Local logs
 *.log
+
+# Local helper build artifacts
+QtHost/PressureFixtureHost/tools/*.exe
+QtHost/PressureFixtureHost/tools/*.out.txt
+QtHost/PressureFixtureHost/tools/*.err.txt
+QtHost/PressureFixtureHost/tools/*.txt

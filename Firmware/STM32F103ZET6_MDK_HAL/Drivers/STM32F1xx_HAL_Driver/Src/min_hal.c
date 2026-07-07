@@ -163,6 +163,8 @@ void HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *init)
 
         if (init->Mode == GPIO_MODE_OUTPUT_PP) {
             cfg = 0x2U;
+        } else if (init->Mode == GPIO_MODE_OUTPUT_OD) {
+            cfg = 0x6U;
         } else if (init->Mode == GPIO_MODE_AF_PP) {
             cfg = 0xAU;
         } else if (init->Mode == GPIO_MODE_ANALOG) {

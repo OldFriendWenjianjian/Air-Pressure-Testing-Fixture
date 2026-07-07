@@ -168,6 +168,28 @@ QByteArray buildManualValve(uint16_t sequence, uint8_t valveNumber, bool open)
     return buildFrame(Request, sequence, ManualValve, payload);
 }
 
+QByteArray buildSetValveMask(uint16_t sequence, uint32_t valveMask, uint32_t openMask)
+{
+    QByteArray payload;
+    appendU32(payload, valveMask);
+    appendU32(payload, openMask & valveMask);
+    return buildFrame(Request, sequence, SetValveMask, payload);
+}
+
+QByteArray buildSingleTankLoop(uint16_t sequence,
+                               uint8_t tankIndex,
+                               double targetMmHg,
+                               double toleranceMmHg,
+                               bool enable)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(tankIndex));
+    appendU32(payload, static_cast<uint32_t>(to001mmHg(targetMmHg)));
+    appendU32(payload, static_cast<uint32_t>(to001mmHg(toleranceMmHg)));
+    payload.append(static_cast<char>(enable ? 1 : 0));
+    return buildFrame(Request, sequence, SingleTankLoop, payload);
+}
+
 QByteArray buildEnterMscReboot(uint16_t sequence)
 {
     return buildFrame(Request, sequence, EnterMscReboot, QByteArray("MSC!", 4));
@@ -187,9 +209,38 @@ QByteArray buildSetPcbaCurrentRange(uint16_t sequence, bool enable50mA)
     return buildFrame(Request, sequence, SetPcbaCurrentRange, payload);
 }
 
+QByteArray buildSetPcbaSupplyVoltage(uint16_t sequence, bool enable5V)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(enable5V ? 50 : 45));
+    return buildFrame(Request, sequence, SetPcbaSupplyVoltage, payload);
+}
+
 QByteArray buildCalibrateAdc(uint16_t sequence)
 {
     return buildFrame(Request, sequence, CalibrateAdc);
+}
+
+QByteArray buildRunPcbaTiming(uint16_t sequence, bool stopOnFail)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(stopOnFail ? 1 : 0));
+    return buildFrame(Request, sequence, RunPcbaTiming, payload);
+}
+
+QByteArray buildGetPcbaTiming(uint16_t sequence)
+{
+    return buildFrame(Request, sequence, GetPcbaTiming);
+}
+
+QByteArray buildRunSingleTankPcba(uint16_t sequence)
+{
+    return buildFrame(Request, sequence, RunSingleTankPcba);
+}
+
+QByteArray buildGetSingleTankPcba(uint16_t sequence)
+{
+    return buildFrame(Request, sequence, GetSingleTankPcba);
 }
 
 bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
@@ -204,6 +255,9 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     constexpr qsizetype adcReferenceOffset = 196;
     constexpr qsizetype currentRawAdcOffset = 208;
     constexpr qsizetype currentRawAdcBlockBytes = kChannelCount * 2;
+    constexpr qsizetype pressureStatusByteOffset = 224;
+    constexpr qsizetype pressureFaultCodeOffset = 238;
+    constexpr qsizetype pcbaPowerFlagsOffset = 207;
     if (payload.size() < minimumLen) {
         return false;
     }
@@ -213,6 +267,7 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     snapshot.state = stateFromIndex(static_cast<uint8_t>(payload[5]));
     snapshot.running = (static_cast<uint8_t>(payload[6]) & 0x01) != 0;
     snapshot.paused = (static_cast<uint8_t>(payload[6]) & 0x02) != 0;
+    snapshot.singlePcbaFlowActive = (static_cast<uint8_t>(payload[6]) & 0x10) != 0;
     snapshot.remoteControlEnabled = true;
     snapshot.thresholdMmHg = toMmHg(getU16(payload, 10));
 
@@ -231,12 +286,21 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     for (int i = 0; i < kPressureSensorCount; ++i) {
         snapshot.pressure001mmHg[i] = static_cast<int>(getU32(payload, offset));
         snapshot.pressureValid[i] = snapshot.pressure001mmHg[i] > 0;
+        snapshot.pressureFaultLatched[i] = false;
+        snapshot.pressureStatusByte[i] = 0u;
+        snapshot.pressureFaultCode[i] = 0u;
         offset += 4;
     }
     if (payload.size() >= pressureValidMaskOffset + 4) {
         const uint32_t pressureValidMask = getU32(payload, pressureValidMaskOffset);
         for (int i = 0; i < kPressureSensorCount; ++i) {
             snapshot.pressureValid[i] = (pressureValidMask & (1u << i)) != 0;
+        }
+    }
+    if (payload.size() >= 207) {
+        const uint16_t pressureFaultMask = getU16(payload, 205);
+        for (int i = 0; i < kPressureSensorCount; ++i) {
+            snapshot.pressureFaultLatched[i] = (pressureFaultMask & (1u << i)) != 0;
         }
     }
     for (int i = 0; i < kChannelCount; ++i) {
@@ -297,6 +361,10 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     }
     snapshot.pcbaCurrent50mAEnabled = payload.size() > pcbaCurrentFlagsOffset &&
                                       (static_cast<uint8_t>(payload[pcbaCurrentFlagsOffset]) & 0x01u) != 0;
+    snapshot.pcbaSupply5VEnabled = payload.size() > pcbaPowerFlagsOffset &&
+                                   (static_cast<uint8_t>(payload[pcbaPowerFlagsOffset]) & 0x01u) != 0;
+    snapshot.pcbaSupply45VEnabled = payload.size() > pcbaPowerFlagsOffset &&
+                                    (static_cast<uint8_t>(payload[pcbaPowerFlagsOffset]) & 0x02u) != 0;
     snapshot.adcReferenceValid = false;
     snapshot.adcReferenceRangeError = false;
     snapshot.adcVrefintRaw = 0;
@@ -317,6 +385,138 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
             channel.currentRawAdcValid = true;
         }
     }
+    if (payload.size() >= pressureStatusByteOffset + kPressureSensorCount) {
+        for (int i = 0; i < kPressureSensorCount; ++i) {
+            snapshot.pressureStatusByte[i] = static_cast<uint8_t>(payload[pressureStatusByteOffset + i]);
+        }
+    }
+    if (payload.size() >= pressureFaultCodeOffset + kPressureSensorCount) {
+        for (int i = 0; i < kPressureSensorCount; ++i) {
+            snapshot.pressureFaultCode[i] = static_cast<uint8_t>(payload[pressureFaultCodeOffset + i]);
+        }
+    }
+    return true;
+}
+
+bool parsePcbaTimingReport(const QByteArray &payload, PcbaTimingReport &report)
+{
+    constexpr qsizetype legacyEntrySize = 12;
+    constexpr qsizetype extendedEntrySize = 16;
+    constexpr qsizetype rawEntrySize = 40;
+    constexpr qsizetype rawOffset = 16;
+    constexpr qsizetype rawMax = 24;
+
+    if (payload.size() < 4) {
+        return false;
+    }
+
+    const uint8_t count = static_cast<uint8_t>(payload[2]);
+    qsizetype actualEntrySize = rawEntrySize;
+    if (payload.size() < 4 + (count * actualEntrySize)) {
+        actualEntrySize = extendedEntrySize;
+    }
+    if (payload.size() < 4 + (count * actualEntrySize)) {
+        actualEntrySize = legacyEntrySize;
+    }
+    if (payload.size() < 4 + (count * actualEntrySize) ||
+        count > static_cast<uint8_t>(report.entries.size())) {
+        return false;
+    }
+
+    PcbaTimingReport parsed;
+    parsed.running = static_cast<uint8_t>(payload[0]) != 0;
+    parsed.done = static_cast<uint8_t>(payload[1]) != 0;
+    parsed.count = count;
+    parsed.finalPass = static_cast<uint8_t>(payload[3]) != 0;
+
+    for (uint8_t i = 0; i < count; ++i) {
+        const qsizetype base = 4 + (i * actualEntrySize);
+        auto &entry = parsed.entries[i];
+        entry.kind = static_cast<uint8_t>(payload[base + 0]);
+        entry.command = static_cast<uint8_t>(payload[base + 1]);
+        entry.ok = static_cast<uint8_t>(payload[base + 2]) != 0;
+        entry.responseCommandOrByte = static_cast<uint8_t>(payload[base + 3]);
+        entry.responseChannel = static_cast<uint8_t>(payload[base + 4]);
+        entry.responseLength = static_cast<uint8_t>(payload[base + 5]);
+        entry.responseData[0] = static_cast<uint8_t>(payload[base + 6]);
+        entry.responseData[1] = actualEntrySize >= extendedEntrySize ? static_cast<uint8_t>(payload[base + 7]) : 0;
+        entry.responseData[2] = actualEntrySize >= extendedEntrySize ? static_cast<uint8_t>(payload[base + 8]) : 0;
+        entry.responseData[3] = actualEntrySize >= extendedEntrySize ? static_cast<uint8_t>(payload[base + 9]) : 0;
+        entry.elapsedUs = actualEntrySize >= extendedEntrySize ? getU32(payload, base + 12) : getU32(payload, base + 8);
+        if (actualEntrySize >= rawEntrySize) {
+            entry.rawResponseLength = static_cast<uint8_t>(payload[base + 10]);
+            if (entry.rawResponseLength > entry.rawResponse.size()) {
+                entry.rawResponseLength = static_cast<uint8_t>(entry.rawResponse.size());
+            }
+            for (uint8_t rawIndex = 0; rawIndex < entry.rawResponseLength && rawIndex < rawMax; ++rawIndex) {
+                entry.rawResponse[rawIndex] = static_cast<uint8_t>(payload[base + rawOffset + rawIndex]);
+            }
+        }
+    }
+
+    report = parsed;
+    return true;
+}
+
+bool parseSingleTankPcbaReport(const QByteArray &payload, SingleTankPcbaReport &report)
+{
+    constexpr qsizetype headerSize = 12;
+    constexpr qsizetype legacyEntrySize = 24;
+    constexpr qsizetype rawEntrySize = 52;
+    constexpr qsizetype rawOffset = 28;
+    constexpr qsizetype rawMax = 24;
+
+    if (payload.size() < headerSize) {
+        return false;
+    }
+
+    const uint8_t count = static_cast<uint8_t>(payload[2]);
+    qsizetype actualEntrySize = rawEntrySize;
+    if (payload.size() < headerSize + (count * actualEntrySize)) {
+        actualEntrySize = legacyEntrySize;
+    }
+    if (count > static_cast<uint8_t>(report.entries.size()) ||
+        payload.size() < headerSize + (count * actualEntrySize)) {
+        return false;
+    }
+
+    SingleTankPcbaReport parsed;
+    parsed.running = static_cast<uint8_t>(payload[0]) != 0;
+    parsed.done = static_cast<uint8_t>(payload[1]) != 0;
+    parsed.count = count;
+    parsed.finalPass = static_cast<uint8_t>(payload[3]) != 0;
+    parsed.standbyCurrentUaX100 = getU32(payload, 4);
+    parsed.workCurrentUaX100 = getU32(payload, 8);
+
+    for (uint8_t i = 0; i < count; ++i) {
+        const qsizetype base = headerSize + (i * actualEntrySize);
+        auto &entry = parsed.entries[i];
+        entry.kind = static_cast<uint8_t>(payload[base + 0]);
+        entry.command = static_cast<uint8_t>(payload[base + 1]);
+        entry.ok = static_cast<uint8_t>(payload[base + 2]) != 0;
+        entry.flags = static_cast<uint8_t>(payload[base + 3]);
+        entry.responseCommandOrByte = static_cast<uint8_t>(payload[base + 4]);
+        entry.responseChannel = static_cast<uint8_t>(payload[base + 5]);
+        entry.responseLength = static_cast<uint8_t>(payload[base + 6]);
+        entry.responseData[0] = static_cast<uint8_t>(payload[base + 7]);
+        entry.responseData[1] = static_cast<uint8_t>(payload[base + 8]);
+        entry.responseData[2] = static_cast<uint8_t>(payload[base + 9]);
+        entry.responseData[3] = static_cast<uint8_t>(payload[base + 10]);
+        entry.currentUaX100 = getU32(payload, base + 12);
+        entry.elapsedUs = getU32(payload, base + 16);
+        entry.parsedValue = getU32(payload, base + 20);
+        if (actualEntrySize >= rawEntrySize) {
+            entry.rawResponseLength = static_cast<uint8_t>(payload[base + 24]);
+            if (entry.rawResponseLength > entry.rawResponse.size()) {
+                entry.rawResponseLength = static_cast<uint8_t>(entry.rawResponse.size());
+            }
+            for (uint8_t rawIndex = 0; rawIndex < entry.rawResponseLength && rawIndex < rawMax; ++rawIndex) {
+                entry.rawResponse[rawIndex] = static_cast<uint8_t>(payload[base + rawOffset + rawIndex]);
+            }
+        }
+    }
+
+    report = parsed;
     return true;
 }
 

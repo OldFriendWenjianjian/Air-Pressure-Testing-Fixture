@@ -15,8 +15,13 @@
 #define LT768_COLOR_DARK_GRAY    0x00202020u
 #define LT768_COLOR_LIGHT_GRAY   0x00E8E8E8u
 
+extern volatile uint32_t g_lt768_progress[8];
+extern volatile uint8_t g_lt768_diagnostics[64];
+
 void LT768_BasicInit(void);
+uint8_t LT768_IsReady(void);
 void LT768_EnableColorBarTest(void);
+void LT768_CycleDisplayCompatibilityMode(void);
 void LT768_ShowFramebufferTest(void);
 void LT768_CaptureDiagnostics(void);
 void LT768_ShowBootText(const char *text);

@@ -15,6 +15,8 @@ static float s_standby_ua[APP_PCBA_CHANNEL_COUNT];
 static float s_work_ua[APP_PCBA_CHANNEL_COUNT];
 static uint8_t s_standby_valid[APP_PCBA_CHANNEL_COUNT];
 static uint8_t s_work_valid[APP_PCBA_CHANNEL_COUNT];
+static uint16_t s_standby_filtered_raw[APP_PCBA_CHANNEL_COUNT];
+static uint16_t s_work_filtered_raw[APP_PCBA_CHANNEL_COUNT];
 
 static int adc_single_conversion(uint16_t *raw)
 {
@@ -37,7 +39,7 @@ static int adc_single_conversion(uint16_t *raw)
 static uint16_t read_adc_raw(uint32_t adc_channel)
 {
     ADC_ChannelConfTypeDef channel = {0};
-    uint16_t raw = 0u;
+    uint32_t raw_sum = 0u;
 
     channel.Channel = adc_channel;
     channel.Rank = ADC_REGULAR_RANK_1;
@@ -49,11 +51,17 @@ static uint16_t read_adc_raw(uint32_t adc_channel)
     if (adc_single_conversion(0) != 0) {
         return 0u;
     }
-    if (adc_single_conversion(&raw) != 0) {
-        return 0u;
+
+    for (uint8_t sample = 0u; sample < APP_PCBA_CURRENT_ADC_AVERAGE_SAMPLES; ++sample) {
+        uint16_t raw = 0u;
+        if (adc_single_conversion(&raw) != 0) {
+            return 0u;
+        }
+        raw_sum += raw;
     }
 
-    return raw;
+    return (uint16_t)((raw_sum + (APP_PCBA_CURRENT_ADC_AVERAGE_SAMPLES / 2u)) /
+                      APP_PCBA_CURRENT_ADC_AVERAGE_SAMPLES);
 }
 
 static float raw_to_adc_mv(uint16_t raw)
@@ -85,6 +93,23 @@ static uint32_t work_shunt_mohm(void)
     return (uint32_t)((numerator + (denominator / 2u)) / denominator);
 }
 
+static uint16_t filter_raw_sample(uint16_t previous, uint16_t current, uint8_t initialized)
+{
+#if APP_PCBA_CURRENT_FILTER_SHIFT > 0
+    const uint32_t keep_weight = (1u << APP_PCBA_CURRENT_FILTER_SHIFT) - 1u;
+#endif
+
+    if (initialized == 0u) {
+        return current;
+    }
+#if APP_PCBA_CURRENT_FILTER_SHIFT > 0
+    return (uint16_t)((((uint32_t)previous * keep_weight) + current + (1u << (APP_PCBA_CURRENT_FILTER_SHIFT - 1u))) >>
+                      APP_PCBA_CURRENT_FILTER_SHIFT);
+#else
+    return current;
+#endif
+}
+
 void AppCurrent_Init(void)
 {
     for (uint8_t i = 0u; i < APP_PCBA_CHANNEL_COUNT; ++i) {
@@ -93,6 +118,8 @@ void AppCurrent_Init(void)
         s_work_ua[i] = 0.0f;
         s_standby_valid[i] = 0u;
         s_work_valid[i] = 0u;
+        s_standby_filtered_raw[i] = 0u;
+        s_work_filtered_raw[i] = 0u;
     }
 }
 
@@ -103,11 +130,16 @@ int AppCurrent_CaptureAll(AppCurrentMode mode)
     for (uint8_t i = 0u; i < APP_PCBA_CHANNEL_COUNT; ++i) {
         uint16_t raw = read_adc_raw(s_current_adc_channels[i]);
 
-        s_raw[i] = raw;
         if (mode == APP_CURRENT_MODE_STANDBY) {
+            raw = filter_raw_sample(s_standby_filtered_raw[i], raw, s_standby_valid[i]);
+            s_standby_filtered_raw[i] = raw;
+            s_raw[i] = raw;
             s_standby_ua[i] = raw_to_current_ua(raw, APP_PCBA_STANDBY_SHUNT_MOHM);
             s_standby_valid[i] = 1u;
         } else {
+            raw = filter_raw_sample(s_work_filtered_raw[i], raw, s_work_valid[i]);
+            s_work_filtered_raw[i] = raw;
+            s_raw[i] = raw;
             s_work_ua[i] = raw_to_current_ua(raw, work_shunt_mohm());
             s_work_valid[i] = 1u;
         }

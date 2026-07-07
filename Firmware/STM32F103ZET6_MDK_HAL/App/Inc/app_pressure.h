@@ -20,11 +20,27 @@ typedef enum {
     PRESSURE_SENSOR_CH8
 } PressureSensorIndex;
 
+typedef enum {
+    APP_PRESSURE_FAULT_NONE = 0,
+    APP_PRESSURE_FAULT_MEASURE_CMD_FAILED,
+    APP_PRESSURE_FAULT_READ_FAILED,
+    APP_PRESSURE_FAULT_NOT_POWERED,
+    APP_PRESSURE_FAULT_BUSY_TIMEOUT,
+    APP_PRESSURE_FAULT_MEMORY_INTEGRITY,
+    APP_PRESSURE_FAULT_MATH_SATURATION,
+    APP_PRESSURE_FAULT_STATUS_INVALID
+} AppPressureFaultCode;
+
 void AppPressure_Init(void);
 void AppPressure_Task(void);
 uint32_t AppPressure_GetRaw(PressureSensorIndex index);
 uint32_t AppPressure_Get001mmHg(PressureSensorIndex index);
 int AppPressure_IsValid(PressureSensorIndex index);
+int AppPressure_IsFaultLatched(PressureSensorIndex index);
+uint32_t AppPressure_GetFaultLatchedMask(void);
+int AppPressure_HasAnyFaultLatched(void);
+uint8_t AppPressure_GetStatusByte(PressureSensorIndex index);
+uint8_t AppPressure_GetFaultCode(PressureSensorIndex index);
 int AppPressure_IsStable(PressureSensorIndex index, uint32_t target_001mmhg);
 int AppPressure_AllChannelOutputsNear(uint32_t target_001mmhg);
 

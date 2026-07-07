@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets network
 
 CONFIG += c++17
 CONFIG -= app_bundle

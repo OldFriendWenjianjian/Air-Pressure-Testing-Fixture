@@ -13,11 +13,27 @@
 #define RCC_BDCR_RTCSEL_LSE        (1UL << 8)
 #define RCC_BDCR_RTCEN             (1UL << 15)
 #define RCC_BDCR_BDRST             (1UL << 16)
+#define BKP_RTCCR_CCO              ((uint16_t)0x0080u)
+#define BKP_RTCCR_ASOE             ((uint16_t)0x0100u)
+#define BKP_RTCCR_ASOS             ((uint16_t)0x0200u)
+#define BKP_CR_TPE                 ((uint16_t)0x0001u)
+#define BKP_CR_TPAL                ((uint16_t)0x0002u)
 #define RTC_CRL_RSF                ((uint16_t)0x0008u)
 #define RTC_CRL_CNF                ((uint16_t)0x0010u)
 #define RTC_CRL_RTOFF              ((uint16_t)0x0020u)
 
 static uint8_t s_flags;
+
+static void release_pc13_from_backup_domain(void)
+{
+    /*
+     * PC13 is also the RTC/TAMPER output pin on STM32F103. Backup-domain
+     * output bits can survive MCU resets and make PC13 emit a 1 Hz RTC pulse,
+     * which conflicts with the fixture's 4.5 V enable output.
+     */
+    BKP->RTCCR &= (uint16_t)~(BKP_RTCCR_CCO | BKP_RTCCR_ASOE | BKP_RTCCR_ASOS);
+    BKP->CR &= (uint16_t)~(BKP_CR_TPE | BKP_CR_TPAL);
+}
 
 static void enable_backup_domain_write(void)
 {
@@ -80,6 +96,7 @@ void AppRtc_Init(void)
     uint8_t lse_ready;
 
     enable_backup_domain_write();
+    release_pc13_from_backup_domain();
     backup_valid = (BKP->DR1 == APP_RTC_BACKUP_MAGIC) ? 1u : 0u;
     lse_ready = wait_lse_ready();
 

@@ -7,8 +7,13 @@ static uint32_t s_counts[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_pressure_001mmhg[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_stable_since[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_stable_target[APP_PRESSURE_SENSOR_COUNT];
+static uint32_t s_invalid_since[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_status[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_valid[APP_PRESSURE_SENSOR_COUNT];
+static uint8_t s_fault_code[APP_PRESSURE_SENSOR_COUNT];
+static uint8_t s_latched_status[APP_PRESSURE_SENSOR_COUNT];
+static uint8_t s_latched_fault_code[APP_PRESSURE_SENSOR_COUNT];
+static uint32_t s_fault_latched_mask;
 
 static void i2c_delay(void)
 {
@@ -203,6 +208,57 @@ static uint8_t status_ok(uint8_t status)
            ((status & 0x01u) == 0u);
 }
 
+static uint8_t decode_fault_code_from_status(uint8_t status)
+{
+    if ((status & 0x40u) == 0u) {
+        return APP_PRESSURE_FAULT_NOT_POWERED;
+    }
+    if ((status & 0x20u) != 0u) {
+        return APP_PRESSURE_FAULT_BUSY_TIMEOUT;
+    }
+    if ((status & 0x04u) != 0u) {
+        return APP_PRESSURE_FAULT_MEMORY_INTEGRITY;
+    }
+    if ((status & 0x01u) != 0u) {
+        return APP_PRESSURE_FAULT_MATH_SATURATION;
+    }
+    return APP_PRESSURE_FAULT_STATUS_INVALID;
+}
+
+static void mark_sensor_invalid(uint8_t sensor,
+                                uint8_t fault_code,
+                                uint8_t status,
+                                uint8_t has_status)
+{
+    if (sensor >= APP_PRESSURE_SENSOR_COUNT) {
+        return;
+    }
+
+    s_valid[sensor] = 0u;
+    if (s_invalid_since[sensor] == 0u) {
+        s_fault_code[sensor] = fault_code;
+        s_status[sensor] = has_status != 0u ? status : 0u;
+        s_invalid_since[sensor] = HAL_GetTick();
+        return;
+    }
+
+    if ((HAL_GetTick() - s_invalid_since[sensor]) >= APP_PRESSURE_INVALID_ABORT_MS &&
+        (s_fault_latched_mask & ((uint32_t)1u << sensor)) == 0u) {
+        s_fault_latched_mask |= (uint32_t)1u << sensor;
+        s_latched_status[sensor] = s_status[sensor];
+        s_latched_fault_code[sensor] = s_fault_code[sensor];
+    }
+}
+
+static void clear_sensor_invalid_timer(uint8_t sensor)
+{
+    if (sensor >= APP_PRESSURE_SENSOR_COUNT) {
+        return;
+    }
+
+    s_invalid_since[sensor] = 0u;
+}
+
 void AppPressure_Init(void)
 {
     GPIO_InitTypeDef init = {0};
@@ -216,14 +272,20 @@ void AppPressure_Init(void)
         s_pressure_001mmhg[i] = 0u;
         s_stable_since[i] = 0u;
         s_stable_target[i] = 0u;
+        s_invalid_since[i] = 0u;
         s_status[i] = 0u;
         s_valid[i] = 0u;
+        s_fault_code[i] = APP_PRESSURE_FAULT_NONE;
+        s_latched_status[i] = 0u;
+        s_latched_fault_code[i] = APP_PRESSURE_FAULT_NONE;
 
         init.Pin = BOARD_I2C_SCL_PINS[i].pin;
         HAL_GPIO_Init(BOARD_I2C_SCL_PINS[i].port, &init);
         init.Pin = BOARD_I2C_SDA_PINS[i].pin;
         HAL_GPIO_Init(BOARD_I2C_SDA_PINS[i].port, &init);
     }
+
+    s_fault_latched_mask = 0u;
 }
 
 void AppPressure_Task(void)
@@ -240,8 +302,13 @@ void AppPressure_Task(void)
         uint8_t status = 0u;
         uint32_t counts = 0u;
 
-        if (requested[i] == 0u || mprls_read_measurement(i, &status, &counts) != 0) {
-            s_valid[i] = 0u;
+        if (requested[i] == 0u) {
+            mark_sensor_invalid(i, APP_PRESSURE_FAULT_MEASURE_CMD_FAILED, 0u, 0u);
+            continue;
+        }
+
+        if (mprls_read_measurement(i, &status, &counts) != 0) {
+            mark_sensor_invalid(i, APP_PRESSURE_FAULT_READ_FAILED, 0u, 0u);
             continue;
         }
 
@@ -250,8 +317,10 @@ void AppPressure_Task(void)
         if (status_ok(status)) {
             s_pressure_001mmhg[i] = counts_to_001mmhg(counts);
             s_valid[i] = 1u;
+            s_fault_code[i] = APP_PRESSURE_FAULT_NONE;
+            clear_sensor_invalid_timer(i);
         } else {
-            s_valid[i] = 0u;
+            mark_sensor_invalid(i, decode_fault_code_from_status(status), status, 1u);
         }
     }
 }
@@ -279,6 +348,51 @@ int AppPressure_IsValid(PressureSensorIndex index)
         return 0;
     }
     return s_valid[(uint8_t)index] != 0u;
+}
+
+int AppPressure_IsFaultLatched(PressureSensorIndex index)
+{
+    if ((uint8_t)index >= APP_PRESSURE_SENSOR_COUNT) {
+        return 1;
+    }
+
+    return (s_fault_latched_mask & ((uint32_t)1u << (uint8_t)index)) != 0u;
+}
+
+uint32_t AppPressure_GetFaultLatchedMask(void)
+{
+    return s_fault_latched_mask;
+}
+
+int AppPressure_HasAnyFaultLatched(void)
+{
+    return s_fault_latched_mask != 0u;
+}
+
+uint8_t AppPressure_GetStatusByte(PressureSensorIndex index)
+{
+    const uint8_t sensor = (uint8_t)index;
+
+    if (sensor >= APP_PRESSURE_SENSOR_COUNT) {
+        return 0u;
+    }
+    if ((s_fault_latched_mask & ((uint32_t)1u << sensor)) != 0u) {
+        return s_latched_status[sensor];
+    }
+    return s_status[sensor];
+}
+
+uint8_t AppPressure_GetFaultCode(PressureSensorIndex index)
+{
+    const uint8_t sensor = (uint8_t)index;
+
+    if (sensor >= APP_PRESSURE_SENSOR_COUNT) {
+        return APP_PRESSURE_FAULT_STATUS_INVALID;
+    }
+    if ((s_fault_latched_mask & ((uint32_t)1u << sensor)) != 0u) {
+        return s_latched_fault_code[sensor];
+    }
+    return s_fault_code[sensor];
 }
 
 int AppPressure_IsStable(PressureSensorIndex index, uint32_t target_001mmhg)

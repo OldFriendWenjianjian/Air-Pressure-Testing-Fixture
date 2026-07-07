@@ -1,6 +1,5 @@
 #include "app_display.h"
 #include "app_config.h"
-#include "app_current.h"
 #include "app_power.h"
 #include "app_pressure.h"
 #include "app_valves.h"
@@ -122,12 +121,13 @@ typedef struct {
     uint32_t tank_pressure[APP_TANK_COUNT];
     uint8_t tank_pressure_valid[APP_TANK_COUNT];
     uint32_t tank_summary_fill[APP_TANK_COUNT];
-    uint32_t channel_pressure[APP_PCBA_CHANNEL_COUNT];
-    uint32_t channel_standby_x100[APP_PCBA_CHANNEL_COUNT];
-    uint32_t channel_summary_fill[APP_PCBA_CHANNEL_COUNT];
+    uint32_t pcba_timing_pass_count;
+    uint32_t pcba_timing_fail_count;
+    uint8_t pcba_probe_service_due;
 } DisplayCache;
 
 static uint8_t s_enabled;
+static uint8_t s_hw_ready;
 static uint32_t s_last_refresh;
 static int8_t s_last_flow_step = -1;
 static DisplayCache s_cache;
@@ -141,29 +141,6 @@ static void display_cache_invalidate(void)
 static uint32_t pressure_whole(uint32_t pressure_001mmhg)
 {
     return (pressure_001mmhg + 500u) / 1000u;
-}
-
-static uint32_t current_ua_x100(float current_ua)
-{
-    if (current_ua <= 0.0f) {
-        return 0u;
-    }
-    if (current_ua >= 42949672.0f) {
-        return 4294967295u;
-    }
-    return (uint32_t)((current_ua * 100.0f) + 0.5f);
-}
-
-static void format_current_x100(char *buffer, size_t buffer_size, uint32_t current_x100)
-{
-    if (buffer_size == 0u) {
-        return;
-    }
-    (void)snprintf(buffer,
-                   buffer_size,
-                   "%lu.%02lu",
-                   (unsigned long)(current_x100 / 100u),
-                   (unsigned long)(current_x100 % 100u));
 }
 
 static void draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color)
@@ -335,7 +312,7 @@ static void draw_static_shell(void)
     draw_text((uint16_t)(RIGHT_X + 24u), 423u, UI_TEXT_DIM, UI_PANEL, "Tank pressure summary");
 
     draw_panel((uint16_t)(RIGHT_X + RIGHT_PAD), 494u, RIGHT_BODY_W, 86u, UI_PANEL, UI_STROKE_SOFT);
-    draw_text((uint16_t)(RIGHT_X + 24u), 505u, UI_TEXT_DIM, UI_PANEL, "PCBA channel summary");
+    draw_text((uint16_t)(RIGHT_X + 24u), 505u, UI_TEXT_DIM, UI_PANEL, "Single PCBA test statistics");
 
     draw_flow_column(1u);
 }
@@ -538,33 +515,41 @@ static void draw_tank_summary(uint8_t force)
 
 static void draw_pcba_summary(uint8_t force)
 {
-    char line1[16];
-    char line2[16];
-    char standby_ua[16];
+    char line[64];
+    const uint32_t pass_count = AppStateMachine_GetPcbaTimingPassCount();
+    const uint32_t fail_count = AppStateMachine_GetPcbaTimingFailCount();
+    const uint32_t total_count = pass_count + fail_count;
+    const uint8_t service_due = AppStateMachine_IsPcbaProbeServiceDue();
 
-    for (uint8_t ch = 0u; ch < APP_PCBA_CHANNEL_COUNT; ++ch) {
-        const uint16_t x = (uint16_t)(RIGHT_X + 24u + (ch * 110u));
-        const uint32_t pressure = AppPressure_Get001mmHg(s_pcba[ch].sensor);
-        const uint32_t pressure_value = pressure_whole(pressure);
-        const uint32_t standby_value = current_ua_x100(AppCurrent_GetStandbyUa((uint8_t)(ch + 1u)));
-        const uint32_t fill = channel_fill(ch);
-
-        if (force == 0u &&
-            s_cache.channel_pressure[ch] == pressure_value &&
-            s_cache.channel_standby_x100[ch] == standby_value &&
-            s_cache.channel_summary_fill[ch] == fill) {
-            continue;
-        }
-
-        format_current_x100(standby_ua, sizeof(standby_ua), standby_value);
-        (void)snprintf(line1, sizeof(line1), "CH%u P%lu", (unsigned)(ch + 1u), (unsigned long)pressure_value);
-        (void)snprintf(line2, sizeof(line2), "S%s", standby_ua);
-        draw_two_line_box(x, 528u, 100u, 44u, fill, UI_STROKE, line1, line2);
-
-        s_cache.channel_pressure[ch] = pressure_value;
-        s_cache.channel_standby_x100[ch] = standby_value;
-        s_cache.channel_summary_fill[ch] = fill;
+    if (force == 0u &&
+        s_cache.pcba_timing_pass_count == pass_count &&
+        s_cache.pcba_timing_fail_count == fail_count &&
+        s_cache.pcba_probe_service_due == service_due) {
+        return;
     }
+
+    draw_panel((uint16_t)(RIGHT_X + RIGHT_PAD), 494u, RIGHT_BODY_W, 86u, UI_PANEL, UI_STROKE_SOFT);
+    draw_text((uint16_t)(RIGHT_X + 24u), 505u, UI_TEXT_DIM, UI_PANEL, "Single PCBA test statistics");
+
+    (void)snprintf(line,
+                   sizeof(line),
+                   "PASS %-8lu   FAIL %-8lu   TOTAL %-8lu",
+                   (unsigned long)pass_count,
+                   (unsigned long)fail_count,
+                   (unsigned long)total_count);
+    draw_text((uint16_t)(RIGHT_X + 24u), 532u, service_due ? UI_BAD : UI_TEXT, UI_PANEL, line);
+
+    if (service_due != 0u) {
+        draw_text((uint16_t)(RIGHT_X + 24u), 556u, UI_BAD, UI_PANEL, "Probe service due: replace fixture pogo pins now");
+    } else {
+        const uint32_t remain = 5000u - (total_count % 5000u);
+        (void)snprintf(line, sizeof(line), "Probe reminder in %lu tests", (unsigned long)remain);
+        draw_text((uint16_t)(RIGHT_X + 24u), 556u, UI_TEXT_DIM, UI_PANEL, line);
+    }
+
+    s_cache.pcba_timing_pass_count = pass_count;
+    s_cache.pcba_timing_fail_count = fail_count;
+    s_cache.pcba_probe_service_due = service_due;
 }
 
 static void draw_dynamic(uint8_t force)
@@ -579,18 +564,38 @@ static void draw_dynamic(uint8_t force)
 void AppDisplay_Init(AppBootMode mode)
 {
     s_enabled = (mode == APP_MODE_NORMAL) ? 1u : 0u;
+    s_hw_ready = (s_enabled != 0u && LT768_IsReady() != 0u) ? 1u : 0u;
     s_last_refresh = 0u;
     s_last_flow_step = -1;
     display_cache_invalidate();
-    if (s_enabled != 0u) {
+    if (s_enabled != 0u && s_hw_ready != 0u) {
         draw_static_shell();
         draw_dynamic(1u);
     }
 }
 
+uint8_t AppDisplay_NeedsHardwareInit(void)
+{
+    return (s_enabled != 0u && s_hw_ready == 0u) ? 1u : 0u;
+}
+
+void AppDisplay_NotifyHardwareReady(void)
+{
+    if (s_enabled == 0u || LT768_IsReady() == 0u) {
+        return;
+    }
+
+    s_hw_ready = 1u;
+    s_last_refresh = 0u;
+    s_last_flow_step = -1;
+    display_cache_invalidate();
+    draw_static_shell();
+    draw_dynamic(1u);
+}
+
 void AppDisplay_Task(void)
 {
-    if (s_enabled == 0u) {
+    if (s_enabled == 0u || s_hw_ready == 0u) {
         return;
     }
 

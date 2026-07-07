@@ -11,7 +11,8 @@
 #define LT768_LCD_HSPW               1u
 
 static uint8_t s_lt768_ready;
-volatile uint8_t g_lt768_diagnostics[32];
+volatile uint8_t g_lt768_diagnostics[64];
+volatile uint32_t g_lt768_progress[8];
 
 static void reg_write(uint8_t reg, uint8_t data)
 {
@@ -25,12 +26,62 @@ static uint8_t reg_read(uint8_t reg)
     return LT768_ReadData();
 }
 
+static uint8_t lt768_register_signature_ok(void)
+{
+    const uint8_t reg01 = reg_read(0x01u);
+    const uint8_t reg12 = reg_read(0x12u);
+    const uint8_t reg13 = reg_read(0x13u);
+    const uint8_t reg14 = reg_read(0x14u);
+    const uint8_t reg15 = reg_read(0x15u);
+    const uint8_t reg1A = reg_read(0x1Au);
+    const uint8_t reg1B = reg_read(0x1Bu);
+    g_lt768_progress[4] = ((uint32_t)reg13 << 24) |
+                          ((uint32_t)reg12 << 16) |
+                          ((uint32_t)reg01 << 8) |
+                          LT768_ReadStatus();
+    g_lt768_progress[5] = ((uint32_t)reg15 << 24) |
+                          ((uint32_t)reg14 << 16) |
+                          ((uint32_t)reg1B << 8) |
+                          reg1A;
+    g_lt768_progress[6] = ((uint32_t)reg_read(0x8Eu) << 24) |
+                          ((uint32_t)reg_read(0x8Cu) << 16) |
+                          ((uint32_t)reg_read(0x84u) << 8) |
+                          0xA5u;
+
+    if ((reg01 & LT768_BIT(7)) == 0u) {
+        return 0u;
+    }
+    if ((reg12 & LT768_BIT(6)) == 0u) {
+        return 0u;
+    }
+    if (reg13 != 0x00u) {
+        return 0u;
+    }
+    if (reg14 != (uint8_t)((LT768_SCREEN_WIDTH / 8u) - 1u) ||
+        reg15 != (uint8_t)(LT768_SCREEN_WIDTH % 8u)) {
+        return 0u;
+    }
+    if (reg1A != (uint8_t)(LT768_SCREEN_HEIGHT - 1u) ||
+        reg1B != (uint8_t)((LT768_SCREEN_HEIGHT - 1u) >> 8)) {
+        return 0u;
+    }
+    return 1u;
+}
+
 static void reg_set_bits(uint8_t reg, uint8_t set_mask, uint8_t clear_mask)
 {
     uint8_t value = reg_read(reg);
     value &= (uint8_t)~clear_mask;
     value |= set_mask;
     reg_write(reg, value);
+}
+
+static void reg_write_masked(uint8_t reg, uint8_t value, uint8_t writable_mask)
+{
+    uint8_t current = reg_read(reg);
+    current &= (uint8_t)~writable_mask;
+    current |= (uint8_t)(value & writable_mask);
+    reg_write(reg, current);
 }
 
 static void wait_2d_idle(void)
@@ -53,6 +104,43 @@ static void wait_sdram_ready(void)
     }
 }
 
+static void wait_power_normal(void)
+{
+    uint32_t start = HAL_GetTick();
+    while ((LT768_ReadStatus() & 0x02u) != 0u) {
+        if ((HAL_GetTick() - start) > 500u) {
+            break;
+        }
+    }
+}
+
+static void wait_initial_display_test_done(void)
+{
+    uint32_t start = HAL_GetTick();
+    while ((LT768_ReadStatus() & 0x02u) != 0u) {
+        if ((HAL_GetTick() - start) > 500u) {
+            break;
+        }
+    }
+}
+
+static void ensure_pll_ready(void)
+{
+    uint8_t retries = 0u;
+
+    while (retries < 5u) {
+        wait_power_normal();
+        HAL_Delay(1u);
+        if ((reg_read(0x01u) & LT768_BIT(7)) != 0u) {
+            return;
+        }
+
+        reg_set_bits(0x01u, LT768_BIT(7), 0u);
+        HAL_Delay(1u);
+        ++retries;
+    }
+}
+
 static void wait_mem_write_fifo_not_full(void)
 {
     uint32_t start = HAL_GetTick();
@@ -65,24 +153,63 @@ static void wait_mem_write_fifo_not_full(void)
 
 static void graphic_mode(void)
 {
-    reg_set_bits(0x03u, 0u, LT768_BIT(2));
+    reg_write_masked(0x03u, 0x00u, LT768_BIT(2));
 }
 
 static void text_mode(void)
 {
-    reg_set_bits(0x03u, LT768_BIT(2), 0u);
+    reg_write_masked(0x03u, LT768_BIT(2), LT768_BIT(2));
 }
 
 static void select_main_window_24bpp(void)
 {
-    uint8_t value = reg_read(0x10u);
-    value |= LT768_BIT(3);
-    reg_write(0x10u, value);
+    reg_write_masked(0x10u, LT768_BIT(3), LT768_BIT(3));
+}
+
+static void display_on(void)
+{
+    reg_set_bits(0x12u, LT768_BIT(6), 0u);
+}
+
+static void configure_lcd_polarity(void)
+{
+    /* Match the vendor init: HSYNC low, VSYNC low, DE high. */
+    reg_write(0x13u, 0x00u);
+}
+
+static void set_display_output_mode(uint8_t pclk_falling,
+                                    uint8_t hsync_active_high,
+                                    uint8_t vsync_active_high,
+                                    uint8_t de_active_low,
+                                    uint8_t rgb_order)
+{
+    uint8_t reg12 = reg_read(0x12u);
+    uint8_t reg13 = reg_read(0x13u);
+
+    /* Keep display enable / color bar / scan direction untouched. */
+    reg12 &= (uint8_t)~(LT768_BIT(7) | LT768_BIT(2) | LT768_BIT(1) | LT768_BIT(0));
+    if (pclk_falling != 0u) {
+        reg12 |= LT768_BIT(7);
+    }
+    reg12 |= (uint8_t)(rgb_order & 0x07u);
+
+    reg13 &= (uint8_t)~(LT768_BIT(7) | LT768_BIT(6) | LT768_BIT(5));
+    if (hsync_active_high != 0u) {
+        reg13 |= LT768_BIT(7);
+    }
+    if (vsync_active_high != 0u) {
+        reg13 |= LT768_BIT(6);
+    }
+    if (de_active_low != 0u) {
+        reg13 |= LT768_BIT(5);
+    }
+
+    reg_write(0x12u, reg12);
+    reg_write(0x13u, reg13);
 }
 
 static void panel_init_1024x600(void)
 {
-    uint8_t value;
     const uint16_t sdram_itv = 0x031Au;
 
     reg_write(0x05u, (uint8_t)((2u << 6) | (5u << 1)));
@@ -102,21 +229,10 @@ static void panel_init_1024x600(void)
     wait_sdram_ready();
     HAL_Delay(1u);
 
-    value = reg_read(0x01u);
-    value &= (uint8_t)~(LT768_BIT(4) | LT768_BIT(3));
-    reg_write(0x01u, value);
-
-    value = reg_read(0x02u);
-    value &= (uint8_t)~(LT768_BIT(7) | LT768_BIT(6) | LT768_BIT(2) | LT768_BIT(1));
-    reg_write(0x02u, value);
-
-    graphic_mode();
-    reg_set_bits(0x03u, 0u, LT768_BIT(1) | LT768_BIT(0));
-
-    value = reg_read(0x12u);
-    value |= LT768_BIT(7);
-    value &= (uint8_t)~(LT768_BIT(4) | LT768_BIT(3) | LT768_BIT(2) | LT768_BIT(1) | LT768_BIT(0));
-    reg_write(0x12u, value);
+    reg_write(0x01u, 0x80u);
+    reg_write(0x02u, 0x00u);
+    reg_write(0x03u, 0x00u);
+    reg_write(0x12u, 0xC0u);
 
     reg_write(0x14u, (uint8_t)((LT768_SCREEN_WIDTH / 8u) - 1u));
     reg_write(0x15u, (uint8_t)(LT768_SCREEN_WIDTH % 8u));
@@ -131,16 +247,10 @@ static void panel_init_1024x600(void)
     reg_write(0x1Eu, (uint8_t)(LT768_LCD_VFPD - 1u));
     reg_write(0x1Fu, (uint8_t)(LT768_LCD_VSPW - 1u));
 
-    value = reg_read(0x5Eu);
-    value &= (uint8_t)~LT768_BIT(2);
-    value |= LT768_BIT(1) | LT768_BIT(0);
-    reg_write(0x5Eu, value);
-
-    select_main_window_24bpp();
-
-    value = reg_read(0x12u);
-    value |= LT768_BIT(6);
-    reg_write(0x12u, value);
+    reg_write(0x5Eu, 0x03u);
+    reg_write(0x10u, 0x08u);
+    reg_write(0x12u, 0xC0u);
+    configure_lcd_polarity();
 }
 
 static void reg_write_u16(uint8_t reg_l, uint16_t value)
@@ -176,23 +286,17 @@ static void framebuffer_init(void)
 
 static void backlight_on(void)
 {
-    uint8_t value;
-
+    /* Match the vendor LT768_PWM1_Init(1, 0, 50, 100, 100) sequence. */
     reg_write(0x84u, 49u);
 
-    value = reg_read(0x85u);
-    value &= (uint8_t)~(LT768_BIT(7) | LT768_BIT(6) | LT768_BIT(2));
-    value |= LT768_BIT(3);
-    reg_write(0x85u, value);
+    /* XPWM1 = PWM1 output, PWM1 clock divided by 1. */
+    reg_set_bits(0x85u, LT768_BIT(3), LT768_BIT(7) | LT768_BIT(6) | LT768_BIT(2));
 
-    reg_write(0x8Cu, 100u);
-    reg_write(0x8Du, 0u);
-    reg_write(0x8Eu, 100u);
-    reg_write(0x8Fu, 0u);
+    reg_write_u16(0x8Eu, 100u);
+    reg_write_u16(0x8Cu, 100u);
 
-    value = reg_read(0x86u);
-    value |= LT768_BIT(4);
-    reg_write(0x86u, value);
+    /* Start PWM1 without disturbing inverter / reload settings. */
+    reg_set_bits(0x86u, LT768_BIT(4), 0u);
 }
 
 static void set_foreground_color(uint32_t color)
@@ -247,22 +351,107 @@ static void square_end_xy(uint16_t x, uint16_t y)
 
 void LT768_BasicInit(void)
 {
+    s_lt768_ready = 0u;
+    g_lt768_progress[1] = 0xB100u;
     (void)LT768_PortInit();
-    s_lt768_ready = 1u;
+    g_lt768_progress[1] = 0xB101u;
+    wait_power_normal();
+    g_lt768_progress[1] = 0xB102u;
+    ensure_pll_ready();
+    g_lt768_progress[1] = 0xB103u;
+    wait_initial_display_test_done();
+    g_lt768_progress[1] = 0xB104u;
     panel_init_1024x600();
+    g_lt768_progress[1] = 0xB105u;
     framebuffer_init();
+    g_lt768_progress[1] = 0xB106u;
+    display_on();
+    g_lt768_progress[1] = 0xB107u;
     backlight_on();
+    g_lt768_progress[1] = 0xB108u;
     select_internal_font_16();
     graphic_mode();
+    g_lt768_progress[1] = 0xB109u;
+    LT768_CaptureDiagnostics();
+    g_lt768_progress[1] = 0xB10Au;
+    if (lt768_register_signature_ok() != 0u) {
+        s_lt768_ready = 1u;
+        g_lt768_progress[1] = 0xB10Bu;
+    } else {
+        s_lt768_ready = 0u;
+        g_lt768_progress[1] = 0xB1EEu;
+    }
+    g_lt768_progress[3] = ((uint32_t)reg_read(0x13u) << 8) | reg_read(0x12u);
+}
+
+uint8_t LT768_IsReady(void)
+{
+    return s_lt768_ready;
 }
 
 void LT768_EnableColorBarTest(void)
 {
+    g_lt768_progress[2] = 0xC100u;
+    if (s_lt768_ready == 0u) {
+        g_lt768_progress[2] = 0xC1EEu;
+    }
+
+    /* Enable display + color bar without clobbering scan/output polarity bits. */
+    reg_set_bits(0x12u, LT768_BIT(6) | LT768_BIT(5), 0u);
+    g_lt768_progress[2] = 0xC101u;
+    g_lt768_progress[4] = reg_read(0x12u);
+    LT768_CaptureDiagnostics();
+    g_lt768_progress[2] = 0xC102u;
+}
+
+void LT768_CycleDisplayCompatibilityMode(void)
+{
+    static const struct {
+        uint8_t pclk_falling;
+        uint8_t hsync_active_high;
+        uint8_t vsync_active_high;
+        uint8_t de_active_low;
+    } modes[] = {
+        {1u, 0u, 0u, 0u}, /* Vendor default: PCLK falling, HS/VS low, DE high. */
+        {0u, 0u, 0u, 0u},
+        {1u, 1u, 1u, 0u},
+        {0u, 1u, 1u, 0u},
+        {1u, 0u, 0u, 1u},
+        {0u, 0u, 0u, 1u},
+        {1u, 1u, 1u, 1u},
+        {0u, 1u, 1u, 1u},
+    };
+    static const uint8_t rgb_orders[] = {
+        0u, /* RGB */
+        1u, /* RBG */
+        2u, /* GRB */
+        3u, /* GBR */
+        4u, /* BRG */
+        5u, /* BGR */
+    };
+    static uint8_t mode_index;
+    static uint8_t rgb_index;
+    uint8_t combined_index;
+
     if (s_lt768_ready == 0u) {
         return;
     }
 
-    reg_set_bits(0x12u, LT768_BIT(5), 0u);
+    set_display_output_mode(modes[mode_index].pclk_falling,
+                            modes[mode_index].hsync_active_high,
+                            modes[mode_index].vsync_active_high,
+                            modes[mode_index].de_active_low,
+                            rgb_orders[rgb_index]);
+    LT768_EnableColorBarTest();
+    combined_index = (uint8_t)(rgb_index * (uint8_t)(sizeof(modes) / sizeof(modes[0])) + mode_index);
+    g_lt768_progress[5] = combined_index;
+    g_lt768_progress[6] = rgb_orders[rgb_index];
+    g_lt768_progress[7] = ((uint32_t)reg_read(0x13u) << 8) | reg_read(0x12u);
+
+    mode_index = (uint8_t)((mode_index + 1u) % (uint8_t)(sizeof(modes) / sizeof(modes[0])));
+    if (mode_index == 0u) {
+        rgb_index = (uint8_t)((rgb_index + 1u) % (uint8_t)(sizeof(rgb_orders) / sizeof(rgb_orders[0])));
+    }
 }
 
 void LT768_ShowFramebufferTest(void)
@@ -284,9 +473,12 @@ void LT768_CaptureDiagnostics(void)
 {
     static const uint8_t regs[] = {
         0x01u, 0x02u, 0x03u, 0x05u, 0x06u, 0x07u, 0x08u, 0x09u,
-        0x0Au, 0x10u, 0x12u, 0x20u, 0x21u, 0x22u, 0x23u, 0x24u,
-        0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x5Eu, 0x84u,
-        0x85u, 0x86u, 0xE0u, 0xE1u, 0xE2u
+        0x0Au, 0x10u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
+        0x18u, 0x19u, 0x1Au, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu,
+        0x20u, 0x21u, 0x22u, 0x23u, 0x24u,
+        0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x5Eu, 0x76u,
+        0x84u, 0x85u, 0x86u, 0x8Cu, 0x8Du, 0x8Eu, 0x8Fu, 0xE0u,
+        0xE1u, 0xE2u, 0xE3u
     };
 
     g_lt768_diagnostics[0] = 0xA5u;

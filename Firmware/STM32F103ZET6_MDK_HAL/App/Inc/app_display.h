@@ -5,5 +5,7 @@
 
 void AppDisplay_Init(AppBootMode mode);
 void AppDisplay_Task(void);
+uint8_t AppDisplay_NeedsHardwareInit(void);
+void AppDisplay_NotifyHardwareReady(void);
 
 #endif

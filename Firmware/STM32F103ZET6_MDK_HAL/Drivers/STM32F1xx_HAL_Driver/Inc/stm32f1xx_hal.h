@@ -45,6 +45,7 @@ typedef enum {
 
 #define GPIO_MODE_INPUT           0x00000000U
 #define GPIO_MODE_OUTPUT_PP       0x00000001U
+#define GPIO_MODE_OUTPUT_OD       0x00000004U
 #define GPIO_MODE_AF_PP           0x00000002U
 #define GPIO_MODE_ANALOG          0x00000003U
 #define GPIO_NOPULL               0x00000000U
@@ -209,9 +210,11 @@ typedef struct {
 #define __HAL_RCC_USB_CLK_DISABLE()       (RCC->APB1ENR &= ~(1UL << 23))
 #define __HAL_RCC_USB_FORCE_RESET()       (RCC->APB1RSTR |= (1UL << 23))
 #define __HAL_RCC_USB_RELEASE_RESET()     (RCC->APB1RSTR &= ~(1UL << 23))
-#define __HAL_AFIO_REMAP_SWJ_NOJTAG()     do { AFIO->MAPR = (AFIO->MAPR & ~(7UL << 24)) | (2UL << 24); } while (0)
-#define __HAL_AFIO_REMAP_USART2_ENABLE()  (AFIO->MAPR |= (1UL << 3))
-#define __HAL_AFIO_REMAP_USART3_ENABLE()  do { AFIO->MAPR = (AFIO->MAPR & ~(3UL << 4)) | (3UL << 4); } while (0)
+#define AFIO_MAPR_SWJ_CFG_MASK            (7UL << 24)
+#define AFIO_MAPR_SWJ_CFG_NOJTAG         (2UL << 24)
+#define __HAL_AFIO_REMAP_SWJ_NOJTAG()     do { AFIO->MAPR = (AFIO->MAPR & ~AFIO_MAPR_SWJ_CFG_MASK) | AFIO_MAPR_SWJ_CFG_NOJTAG; } while (0)
+#define __HAL_AFIO_REMAP_USART2_ENABLE()  do { AFIO->MAPR = (AFIO->MAPR & ~((1UL << 3) | AFIO_MAPR_SWJ_CFG_MASK)) | (1UL << 3) | AFIO_MAPR_SWJ_CFG_NOJTAG; } while (0)
+#define __HAL_AFIO_REMAP_USART3_ENABLE()  do { AFIO->MAPR = (AFIO->MAPR & ~((3UL << 4) | AFIO_MAPR_SWJ_CFG_MASK)) | (3UL << 4) | AFIO_MAPR_SWJ_CFG_NOJTAG; } while (0)
 
 void HAL_Init(void);
 uint32_t HAL_GetTick(void);

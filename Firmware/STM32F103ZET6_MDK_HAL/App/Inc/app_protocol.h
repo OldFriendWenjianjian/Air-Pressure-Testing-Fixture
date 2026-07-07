@@ -10,6 +10,14 @@
 #define PCBA_FRAME_MAX_DATA                 16u
 #define PCBA_FRAME_MAX_SIZE                 (2u + 1u + 1u + 2u + PCBA_FRAME_MAX_DATA + 2u)
 #define PCBA_WAKE_BYTE                      0x00u
+#define PCBA_WAKE_RESPONSE_BYTE             0x00u
+
+/* Verified single-PCBA protocol sequence captured during USB5V bring-up. */
+#define PCBA_CMD_SINGLE_POWER_ON            0x00u
+#define PCBA_CMD_SINGLE_QUERY_LOW_POWER     0x03u
+#define PCBA_CMD_SINGLE_QUERY_NORMAL_POWER  0x04u
+#define PCBA_CMD_SINGLE_RECORD_ZERO_AD      0x05u
+#define PCBA_CMD_WRITE_FLASH                0x20u
 
 typedef enum {
     PCBA_CMD_SET_TEST_MODE          = 0x01u,
@@ -32,6 +40,9 @@ typedef struct {
     uint8_t channel;
     uint16_t len;
     uint8_t data[PCBA_FRAME_MAX_DATA];
+    uint8_t raw_len;
+    uint8_t raw[PCBA_FRAME_MAX_SIZE];
+    uint8_t crc_ok;
 } PcbaFrame;
 
 uint16_t PcbaProtocol_Crc16Modbus(const uint8_t *data, size_t len);

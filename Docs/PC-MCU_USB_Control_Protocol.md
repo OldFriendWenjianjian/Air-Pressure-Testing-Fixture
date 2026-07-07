@@ -52,7 +52,7 @@ This document defines the lightweight USB control protocol between the Qt PC app
 
 CRC input starts at `Version` and ends at the final payload byte. The frame head and CRC bytes are not included in the CRC calculation.
 
-Minimum frame size is `11` bytes. Maximum payload for the current firmware is `256` bytes.
+Minimum frame size is `11` bytes. Maximum payload for the current firmware is `384` bytes.
 
 ## 5. Frame Types
 
@@ -79,6 +79,13 @@ Minimum frame size is `11` bytes. Maximum payload for the current firmware is `2
 | `0x0B` | `SET_RTC_TIME` | Request/Response | Set MCU RTC epoch seconds |
 | `0x0C` | `SET_PCBA_CURRENT_RANGE` | Request/Response | Select PCBA current debug range |
 | `0x0D` | `CALIBRATE_ADC` | Request/Response | Refresh internal VREFINT reference immediately |
+| `0x0E` | `SET_VALVE_MASK` | Request/Response | Set multiple manual valves at once |
+| `0x0F` | `SINGLE_TANK_LOOP` | Request/Response | Start/stop one-tank closed-loop debug |
+| `0x10` | `RUN_PCBA_TIMING` | Request/Response | Run PCBA serial timing diagnostic |
+| `0x11` | `GET_PCBA_TIMING` | Request/Response | Read PCBA serial timing diagnostic report |
+| `0x12` | `RUN_SINGLE_TANK_PCBA` | Request/Response | Run single-tank single-PCBA full-flow diagnostic |
+| `0x13` | `GET_SINGLE_TANK_PCBA` | Request/Response | Read single-tank single-PCBA diagnostic report |
+| `0x14` | `SET_PCBA_SUPPLY_VOLTAGE` | Request/Response | Select PCBA debug supply voltage |
 | `0x7E` | `STATUS_SNAPSHOT` | Report/Response | MCU status snapshot |
 | `0x7F` | `ACK` | Response | Generic success |
 | `0x80` | `NAK` | Response | Generic failure |
@@ -235,6 +242,16 @@ The hardware is shared by all 8 PCBA current channels:
 - PB1 high: the 2300N NMOS is on and enables the low-resistance branch for all 8 PCBA current channels, and the MCU reports work/mA current through `PcbaWorkCurrentUaX100`.
 - The analog front-end gain is `100x`. The mA-mode effective shunt used by firmware is `1kR || (0.2R + Rds(on) of the shared 2300N NMOS)`. The `Rds(on)` value must be set from the actual BOM/datasheet at the PB1 gate-drive voltage.
 
+### SET_PCBA_SUPPLY_VOLTAGE
+
+PC request payload:
+
+| Offset | Size | Field | Description |
+|---:|---:|---|---|
+| 0 | 1 | VoltageCode | `50` means enable PCBA `5V`; `45` means enable PCBA `4.5V` |
+
+The Qt PCBA current test panel sends this command when entering `PCBA电流测试` and whenever the operator changes the `PCBA供电电压` selector. The MCU stores the requested setting and applies it while the PCBA current debug state is active. The selected/actual supply state is reflected by `PcbaPowerFlags` in `STATUS_SNAPSHOT`.
+
 ### CALIBRATE_ADC
 
 Request payload is empty. The MCU samples the STM32 internal voltage reference (`VREFINT`), calculates the current ADC reference voltage used by the board, and reports the result in the next `STATUS_SNAPSHOT`.
@@ -248,7 +265,7 @@ The firmware also refreshes this reference before every multi-channel PCBA curre
 | 0 | 4 | UptimeMs | MCU uptime in ms |
 | 4 | 1 | BootMode | `0` normal CDC; `1` USB MSC; `2` MSC reboot pending |
 | 5 | 1 | RuntimeState | Existing firmware runtime state number |
-| 6 | 1 | WorkflowFlags | Bit0 running; Bit1 paused; Bit2 error; Bit3 manual mode |
+| 6 | 1 | WorkflowFlags | Bit0 running; Bit1 paused; Bit2 error; Bit3 manual mode; Bit4 single-PCBA full-flow active |
 | 7 | 1 | ErrorCode | Last protocol/workflow error |
 | 8 | 2 | TargetHoldPressureMmHg | Current target, normally `285` |
 | 10 | 2 | PressureTolerance001mmHg | Result threshold in `0.001mmHg`, for example `3000` means `3.000mmHg` |
@@ -273,14 +290,17 @@ The firmware also refreshes this reference before every multi-channel PCBA curre
 | 198 | 2 | AdcVddaMv | Latest realtime ADC reference voltage in mV; defaults to `3300` before a valid refresh |
 | 200 | 4 | AdcScalePpm | Realtime ADC scale coefficient in ppm, equal to `AdcVddaMv / 3300mV * 1000000` |
 | 204 | 1 | AdcReferenceFlags | Bit0 realtime VREFINT valid; Bit1 VREFINT/VDDA range error |
-| 205 | 3 | Reserved | Reserved, currently `0` |
+| 205 | 2 | PressureFaultLatchedMask | Bit0 means pressure sensor 1 fault is latched |
+| 207 | 1 | PcbaPowerFlags | Bit0 means PCBA `5V` enabled; Bit1 means PCBA `4.5V` enabled |
 | 208 | 16 | PcbaCurrentRawAdc[8] | PCBA current ADC raw code for channel 1 through channel 8, each `uint16`; this raw code is not corrected by `AdcScalePpm` |
+| 224 | 14 | PressureStatusByte[14] | Latest pressure sensor status byte |
+| 238 | 14 | PressureFaultCode[14] | Latest pressure sensor fault code |
 
-Total payload length: `224` bytes. The Qt decoder remains backward compatible with older `118`, `190`, `196`, and `208` byte snapshots.
+Total payload length: `252` bytes. The Qt decoder remains backward compatible with older `118`, `190`, `196`, `208`, `224`, and `238` byte snapshots.
 
-The Qt architecture view consumes this full snapshot directly: valve blinking comes from `ValveOpenMask`, tank and channel pressure labels come from `Pressure001mmHg` plus `PressureValidMask`, PCBA connection/result badges come from the PCBA masks and `PcbaPressure001mmHg`, the PCBA current debug page comes from the current arrays plus current valid masks, `PcbaCurrentFlags`, and `PcbaCurrentRawAdc`, the ADC realtime reference page comes from `Adc*` fields, and the RTC debug page comes from `RtcEpochSeconds` plus `RtcFlags`. If a pressure sensor or current valid bit is clear, the PC must display `--` instead of showing a fake value or treating `0` as a real reading.
+The Qt architecture view consumes this full snapshot directly: valve blinking comes from `ValveOpenMask`, tank and channel pressure labels come from `Pressure001mmHg` plus `PressureValidMask`, PCBA connection/result badges come from the PCBA masks and `PcbaPressure001mmHg`, the PCBA current debug page comes from the current arrays plus current valid masks, `PcbaCurrentFlags`, and `PcbaCurrentRawAdc`, the ADC realtime reference page comes from `Adc*` fields, and the RTC debug page comes from `RtcEpochSeconds` plus `RtcFlags`. `WorkflowFlags` bit4 is reserved for the dedicated `单PCBA全流程测试` path so the host can distinguish "only channel 1 is intentionally running" from the normal eight-channel production flow. If a pressure sensor or current valid bit is clear, the PC must display `--` instead of showing a fake value or treating `0` as a real reading.
 
-`PcbaCurrentFlags` bit0 selects which current array the Qt PCBA current debug page should treat as the current display. When bit0 is clear, current is shown in uA from `PcbaStandbyCurrentUaX100` and `PcbaStandbyCurrentValidMask`. When bit0 is set, current is shown in mA from `PcbaWorkCurrentUaX100` and `PcbaWorkCurrentValidMask`. The debug page displays only the currently selected range, not separate standby/work columns. The current value is corrected by the realtime internal-reference coefficient; `PcbaCurrentRawAdc` remains the uncorrected ADC raw code. The same page also shows the current internal-reference correction coefficient from `AdcScalePpm / 1000000`; this coefficient is refreshed in firmware before every multi-channel PCBA current capture and is not saved to Flash.
+`PcbaCurrentFlags` bit0 selects which current array the Qt PCBA current debug page should treat as the current display. When bit0 is clear, current is shown in uA from `PcbaStandbyCurrentUaX100` and `PcbaStandbyCurrentValidMask`. When bit0 is set, current is shown in mA from `PcbaWorkCurrentUaX100` and `PcbaWorkCurrentValidMask`. `PcbaPowerFlags` tells the same debug page whether the fixture is currently feeding PCBA `5V`, `4.5V`, both, or neither. The debug page displays only the currently selected range, not separate standby/work columns. The current value is corrected by the realtime internal-reference coefficient; `PcbaCurrentRawAdc` remains the uncorrected ADC raw code. The same page also shows the current internal-reference correction coefficient from `AdcScalePpm / 1000000`; this coefficient is refreshed in firmware before every multi-channel PCBA current capture and is not saved to Flash.
 
 `PcbaWorkCurrentValidMask` is set after the MCU has actually entered `PCBA电流测试` or a normal workflow work-current measurement state and captured ADC samples. Therefore the Qt host must switch the MCU to `PCBA电流测试` and send `SET_PCBA_CURRENT_RANGE` before expecting realtime current values in this debug page.
 
@@ -308,7 +328,7 @@ The firmware file `app_usb_control.c` provides:
 - Snapshot payload pack/unpack helpers.
 - Command and type definitions.
 - A normal-mode USB control task that consumes CDC bytes through the weak `UsbCdcControl_*` port functions.
-- Command dispatch for `HELLO`, `GET_STATUS`, `START`, `STOP`, `PAUSE`, `RESUME`, `SET_STATE`, `SET_THRESHOLD`, `MANUAL_VALVE`, `ENTER_MSC_REBOOT`, `SET_RTC_TIME`, `SET_PCBA_CURRENT_RANGE`, and `CALIBRATE_ADC`.
+- Command dispatch for `HELLO`, `GET_STATUS`, `START`, `STOP`, `PAUSE`, `RESUME`, `SET_STATE`, `SET_THRESHOLD`, `MANUAL_VALVE`, `ENTER_MSC_REBOOT`, `SET_RTC_TIME`, `SET_PCBA_CURRENT_RANGE`, `CALIBRATE_ADC`, `SET_VALVE_MASK`, `SINGLE_TANK_LOOP`, `RUN_PCBA_TIMING`, `GET_PCBA_TIMING`, `RUN_SINGLE_TANK_PCBA`, `GET_SINGLE_TANK_PCBA`, and `SET_PCBA_SUPPLY_VOLTAGE`.
 - Periodic `STATUS_SNAPSHOT` reporting from existing valve, pressure, PCBA, and state-machine getters.
 
 Still not included yet:
