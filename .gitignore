@@ -37,6 +37,12 @@ Thumbs.db
 
 # Local logs
 *.log
+runtime-logs/
+tmp/
+
+# One-off local J-Link probe command files
+Firmware/STM32F103ZET6_MDK_HAL/MDK-ARM/jlink_fault_probe.txt
+Firmware/STM32F103ZET6_MDK_HAL/MDK-ARM/jlink_reset_run.txt
 
 # Local helper build artifacts
 QtHost/PressureFixtureHost/tools/*.exe

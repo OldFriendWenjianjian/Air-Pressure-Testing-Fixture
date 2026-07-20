@@ -9,8 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DISPLAY_POLL_MS           200u
-
 #define UI_BG                     0x00F4F7FBu
 #define UI_PAGE                   0x00FFFFFFu
 #define UI_PANEL                  0x00EEF4FCu
@@ -599,7 +597,7 @@ void AppDisplay_Task(void)
         return;
     }
 
-    if ((HAL_GetTick() - s_last_refresh) < DISPLAY_POLL_MS) {
+    if ((HAL_GetTick() - s_last_refresh) < APP_DISPLAY_POLL_MS) {
         return;
     }
     s_last_refresh = HAL_GetTick();

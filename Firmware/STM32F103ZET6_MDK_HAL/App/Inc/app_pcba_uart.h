@@ -4,9 +4,19 @@
 #include "app_protocol.h"
 #include <stdint.h>
 
+typedef struct {
+    uint32_t burst_count;
+    uint32_t byte_count;
+    uint32_t timeout_count;
+    uint32_t framing_error_count;
+    uint32_t buffer_overflow_count;
+} AppPcbaUartDiagnostics;
+
 void AppPcbaUart_Init(void);
+void AppPcbaUart_SetPowerState(uint8_t powered);
 int AppPcbaUart_Send(uint8_t channel, const uint8_t *data, uint16_t len);
 void AppPcbaUart_FlushRx(uint8_t channel);
+int AppPcbaUart_GetDiagnostics(uint8_t channel, AppPcbaUartDiagnostics *diagnostics);
 int AppPcbaUart_WakeOne(uint8_t channel, uint8_t expected, uint32_t timeout_ms);
 int AppPcbaUart_WakeAll(uint8_t expected, uint32_t timeout_ms);
 int AppPcbaUart_WakeOneTimed(uint8_t channel,

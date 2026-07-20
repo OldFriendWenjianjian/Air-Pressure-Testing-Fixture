@@ -98,6 +98,37 @@ bool PcbaProtocol_IsOneByteAck(const PcbaFrame *frame, uint8_t channel, uint8_t 
            frame->data[0] == expected;
 }
 
+bool PcbaProtocol_IsSuccessAck(const PcbaFrame *frame)
+{
+    if (frame == 0 || frame->cmd != PCBA_CMD_ACK) {
+        return false;
+    }
+    if (frame->len == 1u) {
+        return frame->crc_ok != 0u && frame->data[0] == PCBA_ACK_YES;
+    }
+    if (frame->len == 0u) {
+        uint8_t legacy_crc_data[5];
+        uint16_t legacy_crc;
+        uint16_t received_crc;
+
+        if (frame->crc_ok != 0u) {
+            return true;
+        }
+        if (frame->raw_len != 8u) {
+            return false;
+        }
+        legacy_crc_data[0] = PCBA_CMD_ACK;
+        legacy_crc_data[1] = frame->channel;
+        legacy_crc_data[2] = 1u;
+        legacy_crc_data[3] = 0u;
+        legacy_crc_data[4] = PCBA_ACK_YES;
+        legacy_crc = PcbaProtocol_Crc16Modbus(legacy_crc_data, sizeof(legacy_crc_data));
+        received_crc = (uint16_t)frame->raw[6] | ((uint16_t)frame->raw[7] << 8);
+        return received_crc == legacy_crc;
+    }
+    return false;
+}
+
 bool PcbaProtocol_GetU32Le(const PcbaFrame *frame, uint32_t *value)
 {
     if (frame == 0 || value == 0 || frame->len < 4u) {
@@ -108,6 +139,21 @@ bool PcbaProtocol_GetU32Le(const PcbaFrame *frame, uint32_t *value)
              ((uint32_t)frame->data[1] << 8) |
              ((uint32_t)frame->data[2] << 16) |
              ((uint32_t)frame->data[3] << 24);
+    return true;
+}
+
+bool PcbaProtocol_GetPressure001mmHg(const PcbaFrame *frame,
+                                     uint32_t *pressure_001mmhg)
+{
+    uint32_t wire_value;
+
+    if (pressure_001mmhg == 0 ||
+        !PcbaProtocol_GetU32Le(frame, &wire_value) ||
+        wire_value == UINT32_MAX) {
+        return false;
+    }
+
+    *pressure_001mmhg = wire_value;
     return true;
 }
 

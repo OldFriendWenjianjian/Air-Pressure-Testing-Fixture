@@ -15,21 +15,10 @@
 ADC_HandleTypeDef hadc1;
 SPI_HandleTypeDef hspi2;
 SPI_HandleTypeDef hspi3;
-UART_HandleTypeDef huart1;
-UART_HandleTypeDef huart2;
-UART_HandleTypeDef huart3;
-UART_HandleTypeDef huart4;
-UART_HandleTypeDef huart5;
-
 static void SystemClock_Config(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_SPI3_Init(void);
-static void MX_USART1_UART_Init(void);
-static void MX_USART2_UART_Init(void);
-static void MX_USART3_UART_Init(void);
-static void MX_UART4_Init(void);
-static void MX_UART5_Init(void);
 static AppBootMode DetectBootMode(void);
 #if APP_VALVE1_0_1HZ_TEST_ENABLED
 static void Valve1BlinkTest_Task(void);
@@ -40,7 +29,8 @@ static void Lt768StressTest_Task(void);
 
 /*
  * Local LCD UI must stay enabled in normal boot even when J-Link RTT is active.
- * The screen uses SPI2/LT768 while the PC link uses RTT + SPI3/USARTx, so
+ * The screen uses SPI2/LT768 while the PC link uses RTT + SPI3 and the
+ * eight PCBA links use GPIO software UARTs, so
  * disabling the display here only leaves LCD_RST held low and the panel black.
  */
 #define APP_ENABLE_LOCAL_DISPLAY 1
@@ -135,27 +125,6 @@ int main(void)
 #if APP_PC_LINK_JLINK_RTT_ENABLED
     AppJlinkRttControl_DebugText("AFTER_SPI3\n");
 #endif
-    MX_USART1_UART_Init();
-#if APP_PC_LINK_JLINK_RTT_ENABLED
-    AppJlinkRttControl_DebugText("AFTER_UART1\n");
-#endif
-    MX_USART2_UART_Init();
-#if APP_PC_LINK_JLINK_RTT_ENABLED
-    AppJlinkRttControl_DebugText("AFTER_UART2\n");
-#endif
-    MX_USART3_UART_Init();
-#if APP_PC_LINK_JLINK_RTT_ENABLED
-    AppJlinkRttControl_DebugText("AFTER_UART3\n");
-#endif
-    MX_UART4_Init();
-#if APP_PC_LINK_JLINK_RTT_ENABLED
-    AppJlinkRttControl_DebugText("AFTER_UART4\n");
-#endif
-    MX_UART5_Init();
-#if APP_PC_LINK_JLINK_RTT_ENABLED
-    AppJlinkRttControl_DebugText("AFTER_UART5\n");
-#endif
-
     AppStateMachine_Init(boot_mode);
 #if APP_PC_LINK_JLINK_RTT_ENABLED
     AppJlinkRttControl_DebugText("AFTER_STATE_INIT\n");
@@ -450,53 +419,6 @@ static void MX_SPI3_Init(void)
     if (HAL_SPI_Init(&hspi3) != HAL_OK) {
         Error_Handler();
     }
-}
-
-static void uart_common(UART_HandleTypeDef *huart, USART_TypeDef *instance)
-{
-    huart->Instance = instance;
-    huart->Init.BaudRate = APP_PCBA_UART_BAUDRATE;
-    huart->Init.WordLength = UART_WORDLENGTH_8B;
-    huart->Init.StopBits = UART_STOPBITS_1;
-    huart->Init.Parity = UART_PARITY_NONE;
-    huart->Init.Mode = UART_MODE_TX_RX;
-    huart->Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart->Init.OverSampling = UART_OVERSAMPLING_16;
-    if (HAL_UART_Init(huart) != HAL_OK) {
-        Error_Handler();
-    }
-}
-
-static void MX_USART1_UART_Init(void)
-{
-    __HAL_RCC_USART1_CLK_ENABLE();
-    uart_common(&huart1, USART1);
-}
-
-static void MX_USART2_UART_Init(void)
-{
-    __HAL_RCC_USART2_CLK_ENABLE();
-    __HAL_AFIO_REMAP_USART2_ENABLE();
-    uart_common(&huart2, USART2);
-}
-
-static void MX_USART3_UART_Init(void)
-{
-    __HAL_RCC_USART3_CLK_ENABLE();
-    __HAL_AFIO_REMAP_USART3_ENABLE();
-    uart_common(&huart3, USART3);
-}
-
-static void MX_UART4_Init(void)
-{
-    __HAL_RCC_UART4_CLK_ENABLE();
-    uart_common(&huart4, UART4);
-}
-
-static void MX_UART5_Init(void)
-{
-    __HAL_RCC_UART5_CLK_ENABLE();
-    uart_common(&huart5, UART5);
 }
 
 void Error_Handler(void)

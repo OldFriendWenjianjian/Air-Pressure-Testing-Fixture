@@ -1,6 +1,4 @@
 r
-h
-erase
 loadfile C:/temp/pressure_fixture_flash/PressureFixture_STM32F103ZET6.hex
 r
 g

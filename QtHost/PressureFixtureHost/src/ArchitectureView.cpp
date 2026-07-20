@@ -302,11 +302,16 @@ void ArchitectureView::drawSensor(QPainter &painter, int sensorNumber, const QRe
 {
     const int index = sensorNumber - 1;
     const bool faultLatched = pressureSensorFaultLatched(m_snapshot, index);
+    const bool calibrated = index >= 0 && index < kPressureSensorCount &&
+        (m_snapshot.pressureCalibrationValidMask & (1u << index)) != 0u;
     drawBox(painter, rect,
-            QString("压力检测%1\n%2").arg(sensorNumber).arg(sensorPressureText(m_snapshot, index, 1, true)),
-            faultLatched ? QColor("#fee2e2") : QColor("#fff7ed"),
-            faultLatched ? QColor("#b91c1c") : QColor("#ea580c"),
-            faultLatched, 17.0);
+            QString("压力检测%1\n%2\n%3")
+                .arg(sensorNumber)
+                .arg(sensorPressureText(m_snapshot, index, 1, true))
+                .arg(calibrated ? "已校准" : "未校准"),
+            faultLatched ? QColor("#fee2e2") : (calibrated ? QColor("#ecfdf5") : QColor("#fff7ed")),
+            faultLatched ? QColor("#b91c1c") : (calibrated ? QColor("#15803d") : QColor("#ea580c")),
+            faultLatched || calibrated, 17.0);
 }
 
 void ArchitectureView::drawChannel(QPainter &painter, int channelIndex, const QRectF &rect) const
@@ -374,9 +379,12 @@ QString ArchitectureView::tooltipForKey(const QString &key) const
             .arg(sensorPressureText(m_snapshot, number, 1, true));
     }
     if (parts[0] == "sensor") {
-        return QString("压力检测%1: %2%3")
+        const bool calibrated = number >= 1 && number <= kPressureSensorCount &&
+            (m_snapshot.pressureCalibrationValidMask & (1u << (number - 1))) != 0u;
+        return QString("压力检测%1: %2\n标定: %3%4")
             .arg(number)
             .arg(sensorPressureText(m_snapshot, number - 1, 1, true))
+            .arg(calibrated ? "已校准" : "未校准")
             .arg(pressureSensorFaultLatched(m_snapshot, number - 1) ? "\n状态: 故障锁定，需重新上电" : "");
     }
     if (parts[0] == "channel") {

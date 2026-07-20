@@ -10,9 +10,12 @@ namespace fixture::usb {
 
 constexpr uint8_t kHead0 = 0xA5;
 constexpr uint8_t kHead1 = 0x5A;
-constexpr uint8_t kVersion = 0x01;
-constexpr qsizetype kMaxPayload = 1024;
+constexpr uint8_t kVersion = 0x02;
+constexpr qsizetype kMaxPayload = 1280;
 constexpr qsizetype kMinFrameSize = 11;
+constexpr uint32_t kSingleTankPcbaDefaultMaxDeviation001mmHg = 500u;
+constexpr uint32_t kSingleTankPcbaDefaultTrendWindowMs = 3000u;
+constexpr uint32_t kSingleTankPcbaDefaultMaxDropRate001mmHgPerSecond = 3000u;
 
 enum FrameType : uint8_t {
     Request = 0x01,
@@ -41,9 +44,29 @@ enum Command : uint8_t {
     RunSingleTankPcba = 0x12,
     GetSingleTankPcba = 0x13,
     SetPcbaSupplyVoltage = 0x14,
+    SensorCalibrationAction = 0x15,
+    GetSensorCalibrationStatus = 0x16,
     StatusSnapshot = 0x7E,
     Ack = 0x7F,
     Nak = 0x80,
+};
+
+enum SensorCalibrationOperation : uint8_t {
+    SensorCalibrationEnter = 1,
+    SensorCalibrationExit = 2,
+    SensorCalibrationJog = 3,
+    SensorCalibrationStartAutoVent = 4,
+    SensorCalibrationCancelAutoVent = 5,
+    SensorCalibrationRecord = 6,
+    SensorCalibrationSaveSlot = 7,
+    SensorCalibrationClearSlot = 8,
+    SensorCalibrationResetSession = 9,
+};
+
+enum SensorCalibrationActuator : uint8_t {
+    SensorCalibrationStop = 0,
+    SensorCalibrationFill = 1,
+    SensorCalibrationRelease = 2,
 };
 
 struct Frame {
@@ -83,9 +106,22 @@ QByteArray buildSetPcbaSupplyVoltage(uint16_t sequence, bool enable5V);
 QByteArray buildCalibrateAdc(uint16_t sequence);
 QByteArray buildRunPcbaTiming(uint16_t sequence, bool stopOnFail);
 QByteArray buildGetPcbaTiming(uint16_t sequence);
-QByteArray buildRunSingleTankPcba(uint16_t sequence);
+QByteArray buildRunSingleTankPcba(
+    uint16_t sequence,
+    bool continueOnFail = false,
+    uint32_t maxDeviation001mmHg = kSingleTankPcbaDefaultMaxDeviation001mmHg,
+    uint32_t trendWindowMs = kSingleTankPcbaDefaultTrendWindowMs,
+    uint32_t maxDropRate001mmHgPerSecond =
+        kSingleTankPcbaDefaultMaxDropRate001mmHgPerSecond);
 QByteArray buildGetSingleTankPcba(uint16_t sequence);
+QByteArray buildSensorCalibrationEnter(uint16_t sequence, bool inPlaceMode, uint8_t slot);
+QByteArray buildSensorCalibrationSimpleAction(uint16_t sequence, uint8_t operation);
+QByteArray buildSensorCalibrationJog(uint16_t sequence, uint8_t actuator, uint16_t leaseMs);
+QByteArray buildSensorCalibrationRecord(uint16_t sequence, uint8_t point, uint32_t actual001mmHg);
+QByteArray buildSensorCalibrationSlotAction(uint16_t sequence, uint8_t operation, uint8_t slot);
+QByteArray buildGetSensorCalibrationStatus(uint16_t sequence, uint8_t slot = 0);
 bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot);
+bool parseSensorCalibrationStatus(const QByteArray &payload, SensorCalibrationStatus &status);
 bool parsePcbaTimingReport(const QByteArray &payload, PcbaTimingReport &report);
 bool parseSingleTankPcbaReport(const QByteArray &payload, SingleTankPcbaReport &report);
 QString frameSummary(const Frame &frame);

@@ -68,6 +68,49 @@ constexpr int kRttPollFailureWarnEvery = 50;
 constexpr int kRttPollFailureCloseAfter = 250;
 constexpr int kJlinkTifSwd = 1;
 
+#ifdef Q_OS_WIN
+QString registryStringValue(HKEY key, const wchar_t *valueName)
+{
+    wchar_t buffer[512] = {};
+    DWORD type = 0u;
+    DWORD size = sizeof(buffer);
+    const LONG rc = RegQueryValueExW(key,
+                                     valueName,
+                                     nullptr,
+                                     &type,
+                                     reinterpret_cast<LPBYTE>(buffer),
+                                     &size);
+    if (rc != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) {
+        return QString();
+    }
+    return QString::fromWCharArray(buffer).trimmed();
+}
+
+QStringList registrySubkeys(HKEY key)
+{
+    QStringList names;
+    for (DWORD index = 0u;; ++index) {
+        wchar_t name[256] = {};
+        DWORD nameLength = static_cast<DWORD>(sizeof(name) / sizeof(name[0]));
+        const LONG rc = RegEnumKeyExW(key,
+                                      index,
+                                      name,
+                                      &nameLength,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr);
+        if (rc == ERROR_NO_MORE_ITEMS) {
+            break;
+        }
+        if (rc == ERROR_SUCCESS) {
+            names.push_back(QString::fromWCharArray(name, static_cast<int>(nameLength)));
+        }
+    }
+    return names;
+}
+#endif
+
 bool isSuccessfulJlinkTransferResult(int rc, uint32_t size)
 {
     if (size == 0u) {
@@ -245,49 +288,186 @@ WindowsSerialTransport::~WindowsSerialTransport()
     close();
 }
 
+bool WindowsSerialTransport::isFixtureUsbIdentity(const QString &instanceId,
+                                                  const QString &productName,
+                                                  const QString &serialNumber)
+{
+    const bool fixtureVidPid =
+        instanceId.contains(QStringLiteral("VID_0483&PID_5740"), Qt::CaseInsensitive);
+    const bool fixtureIdentity =
+        productName.compare(QStringLiteral("Pressure Fixture CDC"), Qt::CaseInsensitive) == 0 ||
+        serialNumber.startsWith(QStringLiteral("PF"), Qt::CaseInsensitive);
+    return fixtureVidPid && fixtureIdentity;
+}
+
 QVector<WindowsSerialTransport::PortInfo> WindowsSerialTransport::availablePortInfos()
 {
     QVector<PortInfo> ports;
 #ifdef Q_OS_WIN
-    QHash<QString, QString> descriptions;
-    QSettings serialMap(QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\SERIALCOMM"),
-                        QSettings::NativeFormat);
-    const auto keys = serialMap.allKeys();
-    for (const auto &key : keys) {
-        const QString portName = serialMap.value(key).toString();
-        if (key.contains(QStringLiteral("VID_1366&PID_0105"), Qt::CaseInsensitive) ||
-            key.contains(QStringLiteral("JLink"), Qt::CaseInsensitive)) {
-            descriptions.insert(portName, QStringLiteral("SEGGER J-Link VCOM"));
+    QHash<QString, PortInfo> registryUsbPorts;
+    HKEY usbRoot = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"SYSTEM\\CurrentControlSet\\Enum\\USB",
+                      0u,
+                      KEY_READ | KEY_WOW64_64KEY,
+                      &usbRoot) == ERROR_SUCCESS) {
+        const auto vidPidGroups = registrySubkeys(usbRoot);
+        for (const auto &vidPid : vidPidGroups) {
+            HKEY vidPidKey = nullptr;
+            if (RegOpenKeyExW(usbRoot,
+                              reinterpret_cast<LPCWSTR>(vidPid.utf16()),
+                              0u,
+                              KEY_READ | KEY_WOW64_64KEY,
+                              &vidPidKey) != ERROR_SUCCESS) {
+                continue;
+            }
+            const auto serialGroups = registrySubkeys(vidPidKey);
+            for (const auto &serial : serialGroups) {
+                HKEY deviceKey = nullptr;
+                if (RegOpenKeyExW(vidPidKey,
+                                  reinterpret_cast<LPCWSTR>(serial.utf16()),
+                                  0u,
+                                  KEY_READ | KEY_WOW64_64KEY,
+                                  &deviceKey) != ERROR_SUCCESS) {
+                    continue;
+                }
+            PortInfo info;
+            const QString friendlyName = registryStringValue(deviceKey, L"FriendlyName");
+            QString deviceDescription = registryStringValue(deviceKey, L"DeviceDesc");
+            HKEY parametersKey = nullptr;
+            if (RegOpenKeyExW(deviceKey,
+                              L"Device Parameters",
+                              0u,
+                              KEY_READ | KEY_WOW64_64KEY,
+                              &parametersKey) == ERROR_SUCCESS) {
+                info.portName = registryStringValue(parametersKey, L"PortName");
+                RegCloseKey(parametersKey);
+            }
+
+            if (!info.portName.startsWith(QStringLiteral("COM"), Qt::CaseInsensitive)) {
+                RegCloseKey(deviceKey);
+                continue;
+            }
+            const int descriptionSeparator = deviceDescription.lastIndexOf(QLatin1Char(';'));
+            if (descriptionSeparator >= 0) {
+                deviceDescription = deviceDescription.mid(descriptionSeparator + 1);
+            }
+            info.instanceId = QStringLiteral("USB\\%1\\%2").arg(vidPid, serial);
+            wchar_t dosTarget[512] = {};
+            if (QueryDosDeviceW(reinterpret_cast<LPCWSTR>(info.portName.utf16()),
+                                dosTarget,
+                                static_cast<DWORD>(sizeof(dosTarget) / sizeof(dosTarget[0]))) == 0u) {
+                RegCloseKey(deviceKey);
+                continue;
+            }
+            info.serialNumber = serial;
+            info.isFixtureUsbCdc = isFixtureUsbIdentity(info.instanceId,
+                                                        info.productName,
+                                                        info.serialNumber);
+            info.isSegger = vidPid.contains(QStringLiteral("VID_1366&PID_0105"), Qt::CaseInsensitive) ||
+                            friendlyName.contains(QStringLiteral("JLink"), Qt::CaseInsensitive) ||
+                            friendlyName.contains(QStringLiteral("J-Link"), Qt::CaseInsensitive);
+            if (info.isFixtureUsbCdc) {
+                info.productName = QStringLiteral("Pressure Fixture CDC");
+                info.description = info.productName;
+                info.displayName = QStringLiteral("%1 - 气压检测工装 USB CDC [%2]")
+                                       .arg(info.portName, info.serialNumber);
+            } else if (info.isSegger) {
+                info.description = QStringLiteral("SEGGER J-Link VCOM");
+                info.displayName = QStringLiteral("%1 - %2").arg(info.portName, info.description);
+            } else {
+                info.description = !friendlyName.isEmpty() ? friendlyName : deviceDescription;
+                info.displayName = info.description.isEmpty()
+                    ? info.portName
+                    : QStringLiteral("%1 - %2").arg(info.portName, info.description);
+            }
+            registryUsbPorts.insert(info.portName.toUpper(), info);
+            RegCloseKey(deviceKey);
+            }
+            RegCloseKey(vidPidKey);
         }
+        RegCloseKey(usbRoot);
+    }
+
+    if (registryUsbPorts.isEmpty()) {
+        HKEY fixtureKey = nullptr;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                          L"SYSTEM\\CurrentControlSet\\Enum\\USB\\VID_0483&PID_5740\\PF202601",
+                          0u,
+                          KEY_READ | KEY_WOW64_64KEY,
+                          &fixtureKey) == ERROR_SUCCESS) {
+            HKEY parametersKey = nullptr;
+            PortInfo info;
+            if (RegOpenKeyExW(fixtureKey,
+                              L"Device Parameters",
+                              0u,
+                              KEY_READ | KEY_WOW64_64KEY,
+                              &parametersKey) == ERROR_SUCCESS) {
+                info.portName = registryStringValue(parametersKey, L"PortName");
+                RegCloseKey(parametersKey);
+            }
+            wchar_t dosTarget[512] = {};
+            if (!info.portName.isEmpty() &&
+                QueryDosDeviceW(reinterpret_cast<LPCWSTR>(info.portName.utf16()),
+                                dosTarget,
+                                static_cast<DWORD>(sizeof(dosTarget) / sizeof(dosTarget[0]))) != 0u) {
+                info.instanceId = QStringLiteral("USB\\VID_0483&PID_5740\\PF202601");
+                info.serialNumber = QStringLiteral("PF202601");
+                info.productName = QStringLiteral("Pressure Fixture CDC");
+                info.description = info.productName;
+                info.isFixtureUsbCdc = true;
+                info.displayName = QStringLiteral("%1 - 气压检测工装 USB CDC [PF202601]")
+                                       .arg(info.portName);
+                registryUsbPorts.insert(info.portName.toUpper(), info);
+            }
+            RegCloseKey(fixtureKey);
+        }
+    }
+
+    for (const auto &info : registryUsbPorts) {
+        ports.push_back(info);
     }
 
     for (int i = 1; i <= 64; ++i) {
-        const QString name = QString("COM%1").arg(i);
-        const QString devicePath = QString("\\\\.\\%1").arg(name);
-        HANDLE h = CreateFileW(reinterpret_cast<LPCWSTR>(devicePath.utf16()),
-                               GENERIC_READ | GENERIC_WRITE,
-                               0,
-                               nullptr,
-                               OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL,
-                           nullptr);
-        if (h != INVALID_HANDLE_VALUE) {
-            PortInfo info;
-            info.portName = name;
-            info.description = descriptions.value(name, QStringLiteral("串口"));
-            info.displayName = name;
-            info.isSegger = info.description.contains(QStringLiteral("SEGGER"), Qt::CaseInsensitive);
-            CloseHandle(h);
-            if (info.isSegger) {
-                info.displayName = QString("%1 - %2").arg(name, info.description);
-            }
-
-            ports.push_back(info);
+        const QString portName = QStringLiteral("COM%1").arg(i);
+        if (std::any_of(ports.cbegin(), ports.cend(), [&portName](const PortInfo &info) {
+                return info.portName.compare(portName, Qt::CaseInsensitive) == 0;
+            })) {
+            continue;
         }
+        const QString devicePath = QStringLiteral("\\\\.\\%1").arg(portName);
+        const HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(devicePath.utf16()),
+                                          GENERIC_READ | GENERIC_WRITE,
+                                          0,
+                                          nullptr,
+                                          OPEN_EXISTING,
+                                          FILE_ATTRIBUTE_NORMAL,
+                                          nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        CloseHandle(handle);
+
+        PortInfo info = registryUsbPorts.value(portName.toUpper());
+        if (info.portName.isEmpty()) {
+            info.portName = portName;
+            info.description = QStringLiteral("串口");
+            info.displayName = portName;
+        }
+        ports.push_back(info);
     }
     std::stable_sort(ports.begin(), ports.end(), [](const PortInfo &a, const PortInfo &b) {
-        if (a.isSegger != b.isSegger) {
-            return a.isSegger;
+        const auto rank = [](const PortInfo &port) {
+            if (port.isFixtureUsbCdc) {
+                return 0;
+            }
+            if (!port.isSegger && !port.isRtt) {
+                return 1;
+            }
+            return 2;
+        };
+        if (rank(a) != rank(b)) {
+            return rank(a) < rank(b);
         }
         return a.portName < b.portName;
     });

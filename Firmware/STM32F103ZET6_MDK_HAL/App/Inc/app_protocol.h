@@ -19,6 +19,9 @@
 #define PCBA_CMD_SINGLE_RECORD_ZERO_AD      0x05u
 #define PCBA_CMD_WRITE_FLASH                0x20u
 
+/* Status payload returned by 0x03; this is not a generic command ACK result. */
+#define PCBA_SINGLE_LOW_POWER_ACTIVE        0x01u
+
 typedef enum {
     PCBA_CMD_SET_TEST_MODE          = 0x01u,
     PCBA_CMD_RECORD_ZERO_AD         = 0x02u,
@@ -60,7 +63,10 @@ size_t PcbaProtocol_BuildPressure(uint8_t cmd,
                                   size_t out_size);
 bool PcbaProtocol_IsEmptyAck(const PcbaFrame *frame, uint8_t channel);
 bool PcbaProtocol_IsOneByteAck(const PcbaFrame *frame, uint8_t channel, uint8_t expected);
+bool PcbaProtocol_IsSuccessAck(const PcbaFrame *frame);
 bool PcbaProtocol_GetU32Le(const PcbaFrame *frame, uint32_t *value);
+bool PcbaProtocol_GetPressure001mmHg(const PcbaFrame *frame,
+                                     uint32_t *pressure_001mmhg);
 bool PcbaProtocol_Parse(const uint8_t *bytes, size_t len, PcbaFrame *frame);
 
 #endif

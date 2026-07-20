@@ -5,18 +5,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app_config.h"
 #include "app_state_machine.h"
 
 #define USB_CTRL_FRAME_HEAD0                    0xA5u
 #define USB_CTRL_FRAME_HEAD1                    0x5Au
-#define USB_CTRL_PROTOCOL_VERSION               0x01u
-#define USB_CTRL_MAX_PAYLOAD                    1024u
+#define USB_CTRL_PROTOCOL_VERSION               0x02u
+#define USB_CTRL_MAX_PAYLOAD                    1280u
 #define USB_CTRL_MIN_FRAME_SIZE                 11u
 #define USB_CTRL_MAX_FRAME_SIZE                 (USB_CTRL_MIN_FRAME_SIZE + USB_CTRL_MAX_PAYLOAD)
 #define USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG     285u
 #define USB_CTRL_PRESSURE_SENSOR_COUNT          14u
 #define USB_CTRL_PCBA_CHANNEL_COUNT             8u
-#define USB_CTRL_STATUS_SNAPSHOT_LEN            252u
+#define USB_CTRL_CURRENT_SAMPLE_COUNT           APP_PCBA_CURRENT_SAMPLE_COUNT
+#define USB_CTRL_STATUS_SNAPSHOT_BASE_LEN       252u
+#define USB_CTRL_STATUS_SNAPSHOT_SINGLE_TANK_PROTECTION_LEN 8u
+#define USB_CTRL_STATUS_SNAPSHOT_PRESSURE_DIAGNOSTIC_LEN \
+    (USB_CTRL_PRESSURE_SENSOR_COUNT * 2u * 3u)
+#define USB_CTRL_STATUS_SNAPSHOT_LEN            (USB_CTRL_STATUS_SNAPSHOT_BASE_LEN + \
+                                                 (USB_CTRL_PCBA_CHANNEL_COUNT * 4u * 2u) + \
+                                                 (USB_CTRL_PCBA_CHANNEL_COUNT * USB_CTRL_CURRENT_SAMPLE_COUNT * 4u * 2u) + \
+                                                 USB_CTRL_STATUS_SNAPSHOT_SINGLE_TANK_PROTECTION_LEN + \
+                                                 USB_CTRL_STATUS_SNAPSHOT_PRESSURE_DIAGNOSTIC_LEN)
+#if USB_CTRL_STATUS_SNAPSHOT_LEN > USB_CTRL_MAX_PAYLOAD
+#error "USB status snapshot exceeds protocol payload capacity"
+#endif
 
 typedef enum {
     USB_CTRL_FRAME_REQUEST  = 0x01u,
@@ -45,6 +58,8 @@ typedef enum {
     USB_CTRL_CMD_RUN_SINGLE_TANK_PCBA = 0x12u,
     USB_CTRL_CMD_GET_SINGLE_TANK_PCBA = 0x13u,
     USB_CTRL_CMD_SET_PCBA_SUPPLY_VOLTAGE = 0x14u,
+    USB_CTRL_CMD_SENSOR_CAL_ACTION = 0x15u,
+    USB_CTRL_CMD_GET_SENSOR_CAL_STATUS = 0x16u,
     USB_CTRL_CMD_STATUS_SNAPSHOT   = 0x7Eu,
     USB_CTRL_CMD_ACK               = 0x7Fu,
     USB_CTRL_CMD_NAK               = 0x80u
@@ -128,6 +143,21 @@ typedef struct {
     uint16_t pcba_current_raw_adc[USB_CTRL_PCBA_CHANNEL_COUNT];
     uint8_t pressure_status_byte[USB_CTRL_PRESSURE_SENSOR_COUNT];
     uint8_t pressure_fault_code[USB_CTRL_PRESSURE_SENSOR_COUNT];
+    uint32_t pcba_standby_current_variance_ua2[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint32_t pcba_work_current_variance_ua2[USB_CTRL_PCBA_CHANNEL_COUNT];
+    uint32_t pcba_standby_current_samples_ua_x100[USB_CTRL_PCBA_CHANNEL_COUNT][USB_CTRL_CURRENT_SAMPLE_COUNT];
+    uint32_t pcba_work_current_samples_ua_x100[USB_CTRL_PCBA_CHANNEL_COUNT][USB_CTRL_CURRENT_SAMPLE_COUNT];
+    uint8_t single_tank_protection_flags;
+    uint8_t single_tank_protection_reason;
+    uint8_t single_tank_protection_tank_index;
+    uint8_t single_tank_protection_sensor_index;
+    uint8_t single_tank_protection_inlet_valve;
+    uint8_t reserved0;
+    uint8_t reserved1;
+    uint8_t reserved2;
+    uint16_t pressure_math_saturation_event_count[USB_CTRL_PRESSURE_SENSOR_COUNT];
+    uint16_t pressure_math_saturation_attempt_count[USB_CTRL_PRESSURE_SENSOR_COUNT];
+    uint16_t pressure_math_saturation_success_count[USB_CTRL_PRESSURE_SENSOR_COUNT];
 } UsbCtrlStatusSnapshot;
 
 uint16_t UsbCtrl_Crc16Modbus(const uint8_t *data, size_t len);
@@ -172,6 +202,7 @@ bool UsbCtrl_UnpackStatusSnapshot(const uint8_t *payload,
 
 void AppUsbControl_Init(AppBootMode boot_mode);
 void AppUsbControl_Task(void);
+void AppUsbControl_PublishSingleTankPcbaReport(void);
 void AppUsbControl_OnRxBytes(const uint8_t *data, uint16_t len);
 int AppUsbControl_BuildCurrentStatus(uint8_t frame_type,
                                      uint16_t sequence,

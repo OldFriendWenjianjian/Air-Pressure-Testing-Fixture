@@ -80,6 +80,7 @@ QString stateName(RuntimeState state)
     case RuntimeState::SinglePcbaFlow: return "Single PCBA flow";
     case RuntimeState::PcbaPressureQuery: return "PCBA pressure query";
     case RuntimeState::PcbaWriteFlash: return "PCBA write flash";
+    case RuntimeState::SensorCalibration: return "Sensor calibration";
     case RuntimeState::Count: break;
     }
     return "Unknown";
@@ -119,6 +120,7 @@ QString stateDisplayName(RuntimeState state)
     case RuntimeState::SinglePcbaFlow: return "单PCBA全流程测试";
     case RuntimeState::PcbaPressureQuery: return "PCBA压力查询";
     case RuntimeState::PcbaWriteFlash: return "PCBA写入Flash";
+    case RuntimeState::SensorCalibration: return "传感器校准";
     case RuntimeState::Count: break;
     }
     return "未知状态";
@@ -169,6 +171,8 @@ QString commandName(uint8_t command)
     case 0x12: return "RUN_SINGLE_TANK_PCBA";
     case 0x13: return "GET_SINGLE_TANK_PCBA";
     case 0x14: return "SET_PCBA_SUPPLY_VOLTAGE";
+    case 0x15: return "SENSOR_CALIBRATION_ACTION";
+    case 0x16: return "GET_SENSOR_CALIBRATION_STATUS";
     case 0x7E: return "STATUS";
     case 0x7F: return "ACK";
     case 0x80: return "NAK";
@@ -292,6 +296,29 @@ QString formatCurrentUaX100AsMa(uint32_t currentUaX100, bool valid, int precisio
     const double currentMa = currentUaX100 / 100000.0;
     const QString value = QString::number(currentMa, 'f', clampedPrecision);
     return withUnit ? value + " mA" : value;
+}
+
+QString formatVarianceUa2(uint32_t varianceUa2, bool valid, int precision, bool withUnit)
+{
+    if (!valid) {
+        return "--";
+    }
+
+    const int clampedPrecision = std::clamp(precision, 0, 2);
+    const QString value = QString::number(static_cast<double>(varianceUa2), 'f', clampedPrecision);
+    return withUnit ? value + " uA^2" : value;
+}
+
+QString formatVarianceUa2AsMa2(uint32_t varianceUa2, bool valid, int precision, bool withUnit)
+{
+    if (!valid) {
+        return "--";
+    }
+
+    const int clampedPrecision = std::clamp(precision, 0, 6);
+    const double varianceMa2 = varianceUa2 / 1000000.0;
+    const QString value = QString::number(varianceMa2, 'f', clampedPrecision);
+    return withUnit ? value + " mA^2" : value;
 }
 
 } // namespace fixture

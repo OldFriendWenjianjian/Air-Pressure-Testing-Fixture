@@ -83,6 +83,7 @@
 #define CDC_SET_LINE_CODING              0x20u
 #define CDC_GET_LINE_CODING              0x21u
 #define CDC_SET_CONTROL_LINE_STATE       0x22u
+#define CDC_SEND_BREAK                   0x23u
 
 #define USB_RX_RING_SIZE                 512u
 #define USB_TX_RING_SIZE                 2048u
@@ -598,6 +599,7 @@ static void handle_class_request(const UsbSetupPacket *setup)
         return;
 
     case CDC_SET_CONTROL_LINE_STATE:
+    case CDC_SEND_BREAK:
         ep0_status_in();
         return;
 
@@ -616,6 +618,9 @@ static void handle_setup(void)
     pma_read(setup_raw, PMA_EP0_RX, sizeof(setup_raw));
     parse_setup(setup_raw, &setup);
 
+    s_usb_cdc.ep0_state = EP0_IDLE;
+    s_usb_cdc.ep0_rx_expected = 0u;
+    ep_write_status(0u, USB_EP_STAT_RX, USB_EP_RX_VALID);
     ep_write_status(0u, USB_EP_STAT_TX, USB_EP_TX_NAK);
     if ((setup.bmRequestType & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_STANDARD) {
         handle_standard_request(&setup);

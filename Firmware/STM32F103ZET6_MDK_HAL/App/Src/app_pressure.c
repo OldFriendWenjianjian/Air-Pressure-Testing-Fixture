@@ -1,19 +1,29 @@
 #include "app_pressure.h"
 #include "app_config.h"
+#include "app_pressure_calibration.h"
+#include "app_pressure_hotplug_logic.h"
+#include "app_pressure_math_saturation_logic.h"
 #include "board_pins.h"
 #include "main.h"
 
 static uint32_t s_counts[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_pressure_001mmhg[APP_PRESSURE_SENSOR_COUNT];
+static uint32_t s_nominal_pressure_001mmhg[APP_PRESSURE_SENSOR_COUNT];
+static uint32_t s_safety_pressure_001mmhg[APP_PRESSURE_SENSOR_COUNT];
+static uint32_t s_sample_sequence[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_stable_since[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_stable_target[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_invalid_since[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_status[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_valid[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_fault_code[APP_PRESSURE_SENSOR_COUNT];
+static AppPressureHotplugRecovery s_hotplug_recovery[APP_PRESSURE_SENSOR_COUNT];
+static AppPressureMathSaturationRecovery s_math_saturation_recovery[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_latched_status[APP_PRESSURE_SENSOR_COUNT];
 static uint8_t s_latched_fault_code[APP_PRESSURE_SENSOR_COUNT];
 static uint32_t s_fault_latched_mask;
+static uint32_t s_last_refresh_at;
+static uint16_t s_scan_mask;
 
 static void i2c_delay(void)
 {
@@ -68,6 +78,25 @@ static void i2c_sda_release(uint8_t bus)
 static void i2c_sda_low(uint8_t bus)
 {
     i2c_drive_low(&BOARD_I2C_SDA_PINS[bus]);
+}
+
+static void i2c_recover_bus(uint8_t bus)
+{
+    i2c_sda_release(bus);
+    i2c_scl_low(bus);
+    for (uint8_t pulse = 0u; pulse < 9u; ++pulse) {
+        i2c_scl_release(bus);
+        i2c_delay();
+        i2c_scl_low(bus);
+        i2c_delay();
+    }
+
+    i2c_sda_low(bus);
+    i2c_delay();
+    i2c_scl_release(bus);
+    i2c_delay();
+    i2c_sda_release(bus);
+    i2c_delay();
 }
 
 static void i2c_start(uint8_t bus)
@@ -185,7 +214,7 @@ static int mprls_read_measurement(uint8_t bus, uint8_t *status, uint32_t *counts
     return 0;
 }
 
-static uint32_t counts_to_001mmhg(uint32_t counts)
+static uint32_t counts_to_nominal_001mmhg(uint32_t counts)
 {
     uint32_t span = APP_MPRLS_OUTPUT_MAX_COUNTS - APP_MPRLS_OUTPUT_MIN_COUNTS;
 
@@ -235,6 +264,7 @@ static void mark_sensor_invalid(uint8_t sensor,
     }
 
     s_valid[sensor] = 0u;
+    AppPressureHotplug_Reset(&s_hotplug_recovery[sensor]);
     if (s_invalid_since[sensor] == 0u) {
         s_fault_code[sensor] = fault_code;
         s_status[sensor] = has_status != 0u ? status : 0u;
@@ -259,6 +289,27 @@ static void clear_sensor_invalid_timer(uint8_t sensor)
     s_invalid_since[sensor] = 0u;
 }
 
+static uint8_t recover_sensor_latch_after_valid_sample(uint8_t sensor)
+{
+    const uint32_t sensor_mask = (uint32_t)1u << sensor;
+
+    if ((s_fault_latched_mask & sensor_mask) == 0u) {
+        AppPressureHotplug_Reset(&s_hotplug_recovery[sensor]);
+        return 1u;
+    }
+
+    if (AppPressureHotplug_RecordValid(&s_hotplug_recovery[sensor],
+                                       APP_PRESSURE_HOTPLUG_VALID_SAMPLES) == 0u) {
+        return 0u;
+    }
+
+    s_fault_latched_mask &= ~sensor_mask;
+    s_latched_status[sensor] = 0u;
+    s_latched_fault_code[sensor] = APP_PRESSURE_FAULT_NONE;
+    AppPressureHotplug_Reset(&s_hotplug_recovery[sensor]);
+    return 1u;
+}
+
 void AppPressure_Init(void)
 {
     GPIO_InitTypeDef init = {0};
@@ -270,30 +321,52 @@ void AppPressure_Init(void)
     for (uint8_t i = 0; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
         s_counts[i] = 0u;
         s_pressure_001mmhg[i] = 0u;
+        s_nominal_pressure_001mmhg[i] = 0u;
+        s_safety_pressure_001mmhg[i] = 0u;
+        s_sample_sequence[i] = 0u;
         s_stable_since[i] = 0u;
         s_stable_target[i] = 0u;
         s_invalid_since[i] = 0u;
         s_status[i] = 0u;
         s_valid[i] = 0u;
         s_fault_code[i] = APP_PRESSURE_FAULT_NONE;
+        AppPressureHotplug_Reset(&s_hotplug_recovery[i]);
+        AppPressureMathSaturation_Init(&s_math_saturation_recovery[i]);
         s_latched_status[i] = 0u;
         s_latched_fault_code[i] = APP_PRESSURE_FAULT_NONE;
-
         init.Pin = BOARD_I2C_SCL_PINS[i].pin;
         HAL_GPIO_Init(BOARD_I2C_SCL_PINS[i].port, &init);
         init.Pin = BOARD_I2C_SDA_PINS[i].pin;
         HAL_GPIO_Init(BOARD_I2C_SDA_PINS[i].port, &init);
+        i2c_recover_bus(i);
     }
 
     s_fault_latched_mask = 0u;
+    s_last_refresh_at = 0u;
+    s_scan_mask = 0x3FFFu;
 }
 
 void AppPressure_Task(void)
 {
     uint8_t requested[APP_PRESSURE_SENSOR_COUNT];
+    const uint32_t now = HAL_GetTick();
+
+    if (s_last_refresh_at != 0u &&
+        (now - s_last_refresh_at) < APP_PRESSURE_REFRESH_PERIOD_MS) {
+        return;
+    }
+    s_last_refresh_at = now;
 
     for (uint8_t i = 0u; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
-        requested[i] = mprls_send_measure_command(i) == 0 ? 1u : 0u;
+        requested[i] = 0u;
+        if ((s_scan_mask & ((uint16_t)1u << i)) != 0u) {
+            if (mprls_send_measure_command(i) == 0) {
+                requested[i] = 1u;
+            } else {
+                i2c_recover_bus(i);
+                requested[i] = mprls_send_measure_command(i) == 0 ? 1u : 0u;
+            }
+        }
     }
 
     HAL_Delay(APP_MPRLS_CONVERSION_DELAY_MS);
@@ -301,6 +374,12 @@ void AppPressure_Task(void)
     for (uint8_t i = 0u; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
         uint8_t status = 0u;
         uint32_t counts = 0u;
+        uint32_t calibrated = 0u;
+        uint32_t nominal;
+
+        if ((s_scan_mask & ((uint16_t)1u << i)) == 0u) {
+            continue;
+        }
 
         if (requested[i] == 0u) {
             mark_sensor_invalid(i, APP_PRESSURE_FAULT_MEASURE_CMD_FAILED, 0u, 0u);
@@ -308,6 +387,7 @@ void AppPressure_Task(void)
         }
 
         if (mprls_read_measurement(i, &status, &counts) != 0) {
+            i2c_recover_bus(i);
             mark_sensor_invalid(i, APP_PRESSURE_FAULT_READ_FAILED, 0u, 0u);
             continue;
         }
@@ -315,12 +395,34 @@ void AppPressure_Task(void)
         s_status[i] = status;
         s_counts[i] = counts;
         if (status_ok(status)) {
-            s_pressure_001mmhg[i] = counts_to_001mmhg(counts);
+            nominal = counts_to_nominal_001mmhg(counts);
+            s_nominal_pressure_001mmhg[i] = nominal;
+            if (AppPressureCalibration_Convert(i, counts, &calibrated) == 0) {
+                s_pressure_001mmhg[i] = calibrated;
+            } else {
+                s_pressure_001mmhg[i] = nominal;
+            }
+            s_safety_pressure_001mmhg[i] = s_pressure_001mmhg[i] > nominal ?
+                                           s_pressure_001mmhg[i] : nominal;
+            s_sample_sequence[i]++;
             s_valid[i] = 1u;
             s_fault_code[i] = APP_PRESSURE_FAULT_NONE;
             clear_sensor_invalid_timer(i);
+            if (recover_sensor_latch_after_valid_sample(i) != 0u) {
+                (void)AppPressureMathSaturation_RecordRecovery(
+                    &s_math_saturation_recovery[i]);
+            }
         } else {
-            mark_sensor_invalid(i, decode_fault_code_from_status(status), status, 1u);
+            const uint8_t fault_code = decode_fault_code_from_status(status);
+            if (fault_code == APP_PRESSURE_FAULT_MATH_SATURATION &&
+                AppPressureMathSaturation_RecordFault(
+                    &s_math_saturation_recovery[i],
+                    now,
+                    APP_PRESSURE_MATH_SAT_RETRY_INTERVAL_MS,
+                    APP_PRESSURE_MATH_SAT_MAX_ATTEMPTS) != 0u) {
+                i2c_recover_bus(i);
+            }
+            mark_sensor_invalid(i, fault_code, status, 1u);
         }
     }
 }
@@ -340,6 +442,43 @@ uint32_t AppPressure_Get001mmHg(PressureSensorIndex index)
     }
 
     return s_pressure_001mmhg[(uint8_t)index];
+}
+
+uint32_t AppPressure_GetNominal001mmHg(PressureSensorIndex index)
+{
+    if ((uint8_t)index >= APP_PRESSURE_SENSOR_COUNT || s_valid[(uint8_t)index] == 0u) {
+        return 0u;
+    }
+    return s_nominal_pressure_001mmhg[(uint8_t)index];
+}
+
+uint32_t AppPressure_GetSafety001mmHg(PressureSensorIndex index)
+{
+    if ((uint8_t)index >= APP_PRESSURE_SENSOR_COUNT || s_valid[(uint8_t)index] == 0u) {
+        return 0u;
+    }
+    return s_safety_pressure_001mmhg[(uint8_t)index];
+}
+
+uint32_t AppPressure_GetSampleSequence(PressureSensorIndex index)
+{
+    if ((uint8_t)index >= APP_PRESSURE_SENSOR_COUNT) {
+        return 0u;
+    }
+    return s_sample_sequence[(uint8_t)index];
+}
+
+void AppPressure_SetScanMask(uint16_t sensor_mask)
+{
+    s_scan_mask = (uint16_t)(sensor_mask & 0x3FFFu);
+    for (uint8_t i = 0u; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
+        if ((s_scan_mask & ((uint16_t)1u << i)) == 0u) {
+            s_valid[i] = 0u;
+            s_invalid_since[i] = 0u;
+            AppPressureHotplug_Reset(&s_hotplug_recovery[i]);
+        }
+    }
+    s_last_refresh_at = 0u;
 }
 
 int AppPressure_IsValid(PressureSensorIndex index)
@@ -393,6 +532,27 @@ uint8_t AppPressure_GetFaultCode(PressureSensorIndex index)
         return s_latched_fault_code[sensor];
     }
     return s_fault_code[sensor];
+}
+
+uint16_t AppPressure_GetMathSaturationEventCount(PressureSensorIndex index)
+{
+    const uint8_t sensor = (uint8_t)index;
+    return sensor < APP_PRESSURE_SENSOR_COUNT ?
+           s_math_saturation_recovery[sensor].event_count : 0u;
+}
+
+uint16_t AppPressure_GetMathSaturationAttemptCount(PressureSensorIndex index)
+{
+    const uint8_t sensor = (uint8_t)index;
+    return sensor < APP_PRESSURE_SENSOR_COUNT ?
+           s_math_saturation_recovery[sensor].attempt_count : 0u;
+}
+
+uint16_t AppPressure_GetMathSaturationSuccessCount(PressureSensorIndex index)
+{
+    const uint8_t sensor = (uint8_t)index;
+    return sensor < APP_PRESSURE_SENSOR_COUNT ?
+           s_math_saturation_recovery[sensor].success_count : 0u;
 }
 
 int AppPressure_IsStable(PressureSensorIndex index, uint32_t target_001mmhg)

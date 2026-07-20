@@ -30,6 +30,15 @@ static uint32_t getU32(const QByteArray &bytes, qsizetype offset)
     return qFromLittleEndian<uint32_t>(p);
 }
 
+static int32_t getS32(const QByteArray &bytes, qsizetype offset)
+{
+    const uint32_t value = getU32(bytes, offset);
+    const int64_t signedValue = (value & 0x80000000u) != 0u
+        ? static_cast<int64_t>(value) - (int64_t{1} << 32)
+        : static_cast<int64_t>(value);
+    return static_cast<int32_t>(signedValue);
+}
+
 uint16_t crc16Modbus(const QByteArray &bytes)
 {
     uint16_t crc = 0xFFFF;
@@ -233,14 +242,73 @@ QByteArray buildGetPcbaTiming(uint16_t sequence)
     return buildFrame(Request, sequence, GetPcbaTiming);
 }
 
-QByteArray buildRunSingleTankPcba(uint16_t sequence)
+QByteArray buildRunSingleTankPcba(uint16_t sequence,
+                                  bool continueOnFail,
+                                  uint32_t maxDeviation001mmHg,
+                                  uint32_t trendWindowMs,
+                                  uint32_t maxDropRate001mmHgPerSecond)
 {
-    return buildFrame(Request, sequence, RunSingleTankPcba);
+    QByteArray payload;
+    payload.append(static_cast<char>(continueOnFail ? 1 : 0));
+    appendU32(payload, maxDeviation001mmHg);
+    appendU32(payload, trendWindowMs);
+    appendU32(payload, maxDropRate001mmHgPerSecond);
+    return buildFrame(Request, sequence, RunSingleTankPcba, payload);
 }
 
 QByteArray buildGetSingleTankPcba(uint16_t sequence)
 {
     return buildFrame(Request, sequence, GetSingleTankPcba);
+}
+
+QByteArray buildSensorCalibrationSimpleAction(uint16_t sequence, uint8_t operation)
+{
+    QByteArray payload(1, static_cast<char>(operation));
+    return buildFrame(Request, sequence, SensorCalibrationAction, payload);
+}
+
+QByteArray buildSensorCalibrationEnter(uint16_t sequence, bool inPlaceMode, uint8_t slot)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(SensorCalibrationEnter));
+    payload.append(static_cast<char>(inPlaceMode ? 1 : 0));
+    payload.append(static_cast<char>(slot));
+    return buildFrame(Request, sequence, SensorCalibrationAction, payload);
+}
+
+QByteArray buildSensorCalibrationJog(uint16_t sequence, uint8_t actuator, uint16_t leaseMs)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(SensorCalibrationJog));
+    payload.append(static_cast<char>(actuator));
+    appendU16(payload, leaseMs);
+    return buildFrame(Request, sequence, SensorCalibrationAction, payload);
+}
+
+QByteArray buildSensorCalibrationRecord(uint16_t sequence, uint8_t point, uint32_t actual001mmHg)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(SensorCalibrationRecord));
+    payload.append(static_cast<char>(point));
+    appendU32(payload, actual001mmHg);
+    return buildFrame(Request, sequence, SensorCalibrationAction, payload);
+}
+
+QByteArray buildSensorCalibrationSlotAction(uint16_t sequence, uint8_t operation, uint8_t slot)
+{
+    QByteArray payload;
+    payload.append(static_cast<char>(operation));
+    payload.append(static_cast<char>(slot));
+    return buildFrame(Request, sequence, SensorCalibrationAction, payload);
+}
+
+QByteArray buildGetSensorCalibrationStatus(uint16_t sequence, uint8_t slot)
+{
+    QByteArray payload;
+    if (slot != 0u) {
+        payload.append(static_cast<char>(slot));
+    }
+    return buildFrame(Request, sequence, GetSensorCalibrationStatus, payload);
 }
 
 bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
@@ -258,6 +326,18 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     constexpr qsizetype pressureStatusByteOffset = 224;
     constexpr qsizetype pressureFaultCodeOffset = 238;
     constexpr qsizetype pcbaPowerFlagsOffset = 207;
+    constexpr qsizetype currentVarianceOffset = 252;
+    constexpr qsizetype currentVarianceBlockBytes = kChannelCount * 4;
+    constexpr qsizetype currentSamplesOffset = currentVarianceOffset + (currentVarianceBlockBytes * 2);
+    constexpr qsizetype currentSamplesBlockBytes = kChannelCount * kCurrentSampleCount * 4;
+    constexpr qsizetype singleTankProtectionOffset = currentSamplesOffset + (currentSamplesBlockBytes * 2);
+    constexpr qsizetype pressureCalibrationMaskOffset = 961;
+    constexpr qsizetype pressureCalibrationFlagsOffset = 963;
+    constexpr qsizetype pressureMathSaturationEventOffset = 964;
+    constexpr qsizetype pressureMathSaturationAttemptOffset =
+        pressureMathSaturationEventOffset + (kPressureSensorCount * 2);
+    constexpr qsizetype pressureMathSaturationSuccessOffset =
+        pressureMathSaturationAttemptOffset + (kPressureSensorCount * 2);
     if (payload.size() < minimumLen) {
         return false;
     }
@@ -316,6 +396,10 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
         channel.workCurrentValid = false;
         channel.standbyCurrentUaX100 = 0;
         channel.workCurrentUaX100 = 0;
+        channel.standbyCurrentVarianceUa2 = 0;
+        channel.workCurrentVarianceUa2 = 0;
+        channel.standbyCurrentSamplesUaX100.fill(0);
+        channel.workCurrentSamplesUaX100.fill(0);
         channel.currentRawAdcValid = false;
         channel.currentRawAdc = 0;
         offset += 4;
@@ -370,6 +454,20 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
     snapshot.adcVrefintRaw = 0;
     snapshot.adcVddaMv = 3300;
     snapshot.adcScalePpm = 1000000;
+    snapshot.singleTankProtectionActive = false;
+    snapshot.singleTankProtectionReason = 0u;
+    snapshot.singleTankProtectionTankIndex = -1;
+    snapshot.singleTankProtectionSensorIndex = -1;
+    snapshot.singleTankProtectionInletValve = 0;
+    snapshot.pressureCalibrationStatusAvailable = false;
+    snapshot.pressureCalibrationValidMask = 0u;
+    snapshot.pressureCalibrationModeActive = false;
+    snapshot.pressureCalibrationActuator = 0u;
+    snapshot.pressureCalibrationCapturedMask = 0u;
+    snapshot.pressureCalibrationStorageFault = false;
+    snapshot.pressureMathSaturationEventCount.fill(0u);
+    snapshot.pressureMathSaturationAttemptCount.fill(0u);
+    snapshot.pressureMathSaturationSuccessCount.fill(0u);
     if (payload.size() >= adcReferenceOffset + 12) {
         const uint8_t flags = static_cast<uint8_t>(payload[adcReferenceOffset + 8]);
         snapshot.adcVrefintRaw = getU16(payload, adcReferenceOffset);
@@ -394,6 +492,102 @@ bool applyStatusSnapshot(const QByteArray &payload, FixtureSnapshot &snapshot)
         for (int i = 0; i < kPressureSensorCount; ++i) {
             snapshot.pressureFaultCode[i] = static_cast<uint8_t>(payload[pressureFaultCodeOffset + i]);
         }
+    }
+    if (payload.size() >= currentVarianceOffset + currentVarianceBlockBytes * 2) {
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            channel.standbyCurrentVarianceUa2 = getU32(payload, currentVarianceOffset + i * 4);
+            channel.workCurrentVarianceUa2 = getU32(payload, currentVarianceOffset + currentVarianceBlockBytes + i * 4);
+        }
+    }
+    if (payload.size() >= currentSamplesOffset + currentSamplesBlockBytes) {
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            for (int sample = 0; sample < kCurrentSampleCount; ++sample) {
+                const qsizetype sampleOffset = (i * kCurrentSampleCount + sample) * 4;
+                channel.standbyCurrentSamplesUaX100[sample] = getU32(payload, currentSamplesOffset + sampleOffset);
+            }
+        }
+    }
+    if (payload.size() >= currentSamplesOffset + currentSamplesBlockBytes * 2) {
+        for (int i = 0; i < kChannelCount; ++i) {
+            auto &channel = snapshot.channels[i];
+            for (int sample = 0; sample < kCurrentSampleCount; ++sample) {
+                const qsizetype sampleOffset = (i * kCurrentSampleCount + sample) * 4;
+                channel.workCurrentSamplesUaX100[sample] =
+                    getU32(payload, currentSamplesOffset + currentSamplesBlockBytes + sampleOffset);
+            }
+        }
+    }
+    if (payload.size() >= singleTankProtectionOffset + 5) {
+        snapshot.singleTankProtectionActive =
+            (static_cast<uint8_t>(payload[singleTankProtectionOffset]) & 0x01u) != 0;
+        snapshot.singleTankProtectionReason =
+            static_cast<uint8_t>(payload[singleTankProtectionOffset + 1]);
+        snapshot.singleTankProtectionTankIndex = snapshot.singleTankProtectionActive
+            ? static_cast<int>(static_cast<uint8_t>(payload[singleTankProtectionOffset + 2]))
+            : -1;
+        snapshot.singleTankProtectionSensorIndex = snapshot.singleTankProtectionActive
+            ? static_cast<int>(static_cast<uint8_t>(payload[singleTankProtectionOffset + 3]))
+            : -1;
+        snapshot.singleTankProtectionInletValve = snapshot.singleTankProtectionActive
+            ? static_cast<int>(static_cast<uint8_t>(payload[singleTankProtectionOffset + 4]))
+            : 0;
+    }
+    if (payload.size() > pressureCalibrationFlagsOffset) {
+        const uint8_t flags = static_cast<uint8_t>(payload[pressureCalibrationFlagsOffset]);
+        snapshot.pressureCalibrationStatusAvailable = true;
+        snapshot.pressureCalibrationValidMask = getU16(payload, pressureCalibrationMaskOffset);
+        snapshot.pressureCalibrationActuator = flags & 0x03u;
+        snapshot.pressureCalibrationModeActive = (flags & 0x04u) != 0u;
+        snapshot.pressureCalibrationCapturedMask = (flags >> 3) & 0x0Fu;
+        snapshot.pressureCalibrationStorageFault = (flags & 0x80u) != 0u;
+    }
+    if (payload.size() >= pressureMathSaturationSuccessOffset + (kPressureSensorCount * 2)) {
+        for (int i = 0; i < kPressureSensorCount; ++i) {
+            snapshot.pressureMathSaturationEventCount[i] =
+                getU16(payload, pressureMathSaturationEventOffset + i * 2);
+            snapshot.pressureMathSaturationAttemptCount[i] =
+                getU16(payload, pressureMathSaturationAttemptOffset + i * 2);
+            snapshot.pressureMathSaturationSuccessCount[i] =
+                getU16(payload, pressureMathSaturationSuccessOffset + i * 2);
+        }
+    }
+    return true;
+}
+
+bool parseSensorCalibrationStatus(const QByteArray &payload, SensorCalibrationStatus &status)
+{
+    constexpr qsizetype statusLength = 48;
+    constexpr qsizetype pointBaseOffset = 16;
+    constexpr qsizetype pointSize = 8;
+    if (payload.size() != statusLength) {
+        return false;
+    }
+
+    const uint8_t flags = static_cast<uint8_t>(payload[1]);
+    status = SensorCalibrationStatus{};
+    status.version = static_cast<uint8_t>(payload[0]);
+    status.active = (flags & 0x01u) != 0u;
+    status.sourceValid = (flags & 0x02u) != 0u;
+    status.sourceFault = (flags & 0x04u) != 0u;
+    status.storageLoaded = (flags & 0x08u) != 0u;
+    status.stagedComplete = (flags & 0x10u) != 0u;
+    status.zeroReady = (flags & 0x20u) != 0u;
+    status.autoVentActive = (flags & 0x40u) != 0u;
+    status.storageFault = (flags & 0x80u) != 0u;
+    status.actuator = static_cast<uint8_t>(payload[2]) & 0x03u;
+    status.inPlaceMode = (static_cast<uint8_t>(payload[2]) & 0x04u) != 0u;
+    status.capturedMask = static_cast<uint8_t>(payload[3]) & 0x0Fu;
+    status.calibratedMask = getU16(payload, 4);
+    status.selectedSlot = static_cast<uint8_t>(payload[6]);
+    status.detail = static_cast<uint8_t>(payload[7]);
+    status.liveRaw = getU32(payload, 8);
+    status.liveNominal001mmHg = getU32(payload, 12);
+    for (int point = 0; point < 4; ++point) {
+        const qsizetype offset = pointBaseOffset + point * pointSize;
+        status.rawPoints[point] = getU32(payload, offset);
+        status.actual001mmHg[point] = getU32(payload, offset + 4);
     }
     return true;
 }
@@ -505,6 +699,16 @@ bool parseSingleTankPcbaReport(const QByteArray &payload, SingleTankPcbaReport &
         entry.currentUaX100 = getU32(payload, base + 12);
         entry.elapsedUs = getU32(payload, base + 16);
         entry.parsedValue = getU32(payload, base + 20);
+        if (entry.kind == 1u && entry.command == 0x11u) {
+            entry.comparisonPressure001mmHg = entry.currentUaX100;
+        }
+        if (entry.kind == 4u) {
+            entry.trendSampleCount = entry.responseCommandOrByte;
+            entry.trendSlope001mmHgPerSecond = getS32(payload, base + 12);
+            entry.trendMaxResidual001mmHg = getU32(payload, base + 7);
+            entry.trendObservationUs = entry.elapsedUs;
+            entry.trendPredictedPressure001mmHg = entry.parsedValue;
+        }
         if (actualEntrySize >= rawEntrySize) {
             entry.rawResponseLength = static_cast<uint8_t>(payload[base + 24]);
             if (entry.rawResponseLength > entry.rawResponse.size()) {

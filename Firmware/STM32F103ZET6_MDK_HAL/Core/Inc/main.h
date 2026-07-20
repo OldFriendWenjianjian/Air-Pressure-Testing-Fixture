@@ -10,12 +10,6 @@ extern "C" {
 extern ADC_HandleTypeDef hadc1;
 extern SPI_HandleTypeDef hspi2;
 extern SPI_HandleTypeDef hspi3;
-extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart2;
-extern UART_HandleTypeDef huart3;
-extern UART_HandleTypeDef huart4;
-extern UART_HandleTypeDef huart5;
-
 typedef struct {
     uint32_t signature;
     uint32_t fault_type;

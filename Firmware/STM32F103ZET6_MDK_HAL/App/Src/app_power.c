@@ -1,4 +1,5 @@
 #include "app_power.h"
+#include "app_pcba_uart.h"
 #include "board_pins.h"
 
 static uint8_t s_power_5v_enabled;
@@ -7,6 +8,7 @@ static uint8_t s_power_50ma_enabled;
 
 void AppPower_AllOff(void)
 {
+    AppPcbaUart_SetPowerState(0u);
     HAL_GPIO_WritePin(PCBA_5V_ENABLE_GPIO_Port, PCBA_5V_ENABLE_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PCBA_45V_ENABLE_GPIO_Port, PCBA_45V_ENABLE_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PCBA_50MA_ENABLE_GPIO_Port, PCBA_50MA_ENABLE_Pin, GPIO_PIN_RESET);
@@ -19,6 +21,7 @@ void AppPower_Enable5V(void)
 {
     HAL_GPIO_WritePin(PCBA_45V_ENABLE_GPIO_Port, PCBA_45V_ENABLE_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PCBA_5V_ENABLE_GPIO_Port, PCBA_5V_ENABLE_Pin, GPIO_PIN_SET);
+    AppPcbaUart_SetPowerState(1u);
     s_power_5v_enabled = 1u;
     s_power_45v_enabled = 0u;
 }
@@ -27,6 +30,7 @@ void AppPower_Enable45V(void)
 {
     HAL_GPIO_WritePin(PCBA_5V_ENABLE_GPIO_Port, PCBA_5V_ENABLE_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(PCBA_45V_ENABLE_GPIO_Port, PCBA_45V_ENABLE_Pin, GPIO_PIN_SET);
+    AppPcbaUart_SetPowerState(1u);
     s_power_5v_enabled = 0u;
     s_power_45v_enabled = 1u;
 }

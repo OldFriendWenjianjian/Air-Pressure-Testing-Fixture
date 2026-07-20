@@ -40,11 +40,18 @@ typedef enum {
     APP_STATE_SINGLE_PCBA_FLOW,
     APP_STATE_PCBA_PRESSURE_QUERY,
     APP_STATE_PCBA_WRITE_FLASH,
+    APP_STATE_SENSOR_CALIBRATION,
     APP_STATE_COUNT
 } AppRuntimeState;
 
+typedef enum {
+    APP_SINGLE_TANK_PROTECTION_NONE = 0,
+    APP_SINGLE_TANK_PROTECTION_SENSOR_FAULT = 1,
+    APP_SINGLE_TANK_PROTECTION_NO_PRESSURE_RISE = 2
+} AppSingleTankProtectionReason;
+
 #define APP_PCBA_TIMING_STEP_COUNT 10u
-#define APP_SINGLE_TANK_PCBA_STEP_COUNT 17u
+#define APP_SINGLE_TANK_PCBA_STEP_COUNT 23u
 #define APP_PCBA_REPORT_RAW_MAX 24u
 
 typedef struct {
@@ -127,6 +134,11 @@ uint8_t AppStateMachine_IsSingleTankLoopActive(void);
 uint8_t AppStateMachine_GetSingleTankIndex(void);
 uint32_t AppStateMachine_GetSingleTankTarget001mmHg(void);
 uint32_t AppStateMachine_GetSingleTankTolerance001mmHg(void);
+uint8_t AppStateMachine_IsSingleTankProtectionActive(void);
+uint8_t AppStateMachine_GetSingleTankProtectionReason(void);
+uint8_t AppStateMachine_GetSingleTankProtectionTankIndex(void);
+uint8_t AppStateMachine_GetSingleTankProtectionSensorIndex(void);
+uint8_t AppStateMachine_GetSingleTankProtectionInletValve(void);
 uint8_t AppStateMachine_IsSinglePcbaFlowActive(void);
 void AppStateMachine_SetPcbaCurrent50mAEnabled(uint8_t enabled);
 uint8_t AppStateMachine_IsPcbaCurrent50mAEnabled(void);
@@ -138,10 +150,24 @@ uint8_t AppStateMachine_IsPcbaNormalPowerOk(uint8_t channel);
 uint32_t AppStateMachine_GetPcbaTestPressure001mmHg(uint8_t channel);
 int AppStateMachine_RequestPcbaTimingDiagnostic(uint8_t stop_on_fail);
 void AppStateMachine_GetPcbaTimingReport(AppPcbaTimingReport *report);
-int AppStateMachine_RequestSingleTankPcbaDiagnostic(void);
+int AppStateMachine_RequestSingleTankPcbaDiagnostic(
+    uint8_t continue_on_fail,
+    uint32_t trend_max_residual_001mmhg,
+    uint32_t trend_window_ms,
+    uint32_t max_drop_rate_001mmhg_per_s);
 void AppStateMachine_GetSingleTankPcbaReport(AppSingleTankPcbaReport *report);
 uint32_t AppStateMachine_GetPcbaTimingPassCount(void);
 uint32_t AppStateMachine_GetPcbaTimingFailCount(void);
 uint8_t AppStateMachine_IsPcbaProbeServiceDue(void);
+int AppStateMachine_RequestSensorCalibrationEnter(uint8_t in_place_mode,
+                                                  uint8_t destination_slot);
+int AppStateMachine_RequestSensorCalibrationExit(void);
+int AppStateMachine_SensorCalibrationJog(uint8_t actuator, uint16_t lease_ms);
+int AppStateMachine_SensorCalibrationStartAutoVent(void);
+int AppStateMachine_SensorCalibrationCancelAutoVent(void);
+int AppStateMachine_SensorCalibrationRecord(uint8_t point_index, uint32_t actual_001mmhg);
+int AppStateMachine_SensorCalibrationSaveSlot(uint8_t slot);
+int AppStateMachine_SensorCalibrationClearSlot(uint8_t slot);
+int AppStateMachine_SensorCalibrationResetSession(void);
 
 #endif

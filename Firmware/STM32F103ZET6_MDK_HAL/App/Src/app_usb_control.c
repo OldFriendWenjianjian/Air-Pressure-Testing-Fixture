@@ -5,7 +5,9 @@
 #include "app_jlink_rtt_control.h"
 #include "app_power.h"
 #include "app_pressure.h"
+#include "app_pressure_calibration.h"
 #include "app_rtc.h"
+#include "app_sensor_calibration.h"
 #include "app_valves.h"
 #include "main.h"
 
@@ -22,6 +24,17 @@ static AppUsbControlContext s_usb_ctrl;
 static uint8_t s_task_rx_chunk[64];
 static uint8_t s_status_payload[USB_CTRL_STATUS_SNAPSHOT_LEN];
 static uint8_t s_tx_frame[USB_CTRL_MAX_FRAME_SIZE];
+static UsbCtrlFrame s_rx_frame_scratch;
+static UsbCtrlStatusSnapshot s_status_snapshot_scratch;
+static AppPcbaTimingReport s_pcba_timing_report_scratch;
+static uint8_t s_pcba_timing_payload[4u + (APP_PCBA_TIMING_STEP_COUNT * 40u)];
+static AppSingleTankPcbaReport s_single_tank_pcba_report_scratch;
+static uint8_t s_single_tank_pcba_payload[12u + (APP_SINGLE_TANK_PCBA_STEP_COUNT * 52u)];
+static uint8_t s_sensor_calibration_payload[48u];
+
+#if (12u + (APP_SINGLE_TANK_PCBA_STEP_COUNT * 52u)) > USB_CTRL_MAX_PAYLOAD
+#error "USB control payload is too small for the single-tank PCBA report"
+#endif
 #if APP_PC_LINK_JLINK_RTT_ENABLED
 static uint32_t s_usb_task_alive_ms = 0u;
 #endif
@@ -31,7 +44,8 @@ static void send_ack(uint16_t sequence, uint8_t accepted_command, uint8_t status
 static void send_nak(uint16_t sequence, uint8_t rejected_command, uint8_t error_code);
 static void send_status(uint8_t frame_type, uint16_t sequence);
 static void send_pcba_timing(uint16_t sequence);
-static void send_single_tank_pcba(uint16_t sequence);
+static void send_single_tank_pcba(uint8_t frame_type, uint16_t sequence);
+static void send_sensor_calibration_status(uint16_t sequence, uint8_t selected_slot);
 static void handle_frame(const UsbCtrlFrame *frame);
 static uint8_t usb_control_write_all(const uint8_t *data, uint16_t len);
 
@@ -269,6 +283,20 @@ bool UsbCtrl_PackStatusSnapshot(const UsbCtrlStatusSnapshot *snapshot,
                                 uint8_t *payload,
                                 uint16_t *payload_len)
 {
+    const uint16_t standby_variance_offset = USB_CTRL_STATUS_SNAPSHOT_BASE_LEN;
+    const uint16_t work_variance_offset = standby_variance_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * 4u);
+    const uint16_t standby_samples_offset = work_variance_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * 4u);
+    const uint16_t work_samples_offset =
+        standby_samples_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * USB_CTRL_CURRENT_SAMPLE_COUNT * 4u);
+    const uint16_t single_tank_protection_offset =
+        work_samples_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * USB_CTRL_CURRENT_SAMPLE_COUNT * 4u);
+    const uint16_t math_saturation_event_offset =
+        single_tank_protection_offset + USB_CTRL_STATUS_SNAPSHOT_SINGLE_TANK_PROTECTION_LEN;
+    const uint16_t math_saturation_attempt_offset =
+        math_saturation_event_offset + (USB_CTRL_PRESSURE_SENSOR_COUNT * 2u);
+    const uint16_t math_saturation_success_offset =
+        math_saturation_attempt_offset + (USB_CTRL_PRESSURE_SENSOR_COUNT * 2u);
+
     if (snapshot == 0 || payload == 0 || payload_len == 0) {
         return false;
     }
@@ -319,6 +347,33 @@ bool UsbCtrl_PackStatusSnapshot(const UsbCtrlStatusSnapshot *snapshot,
         payload[224u + i] = snapshot->pressure_status_byte[i];
         payload[238u + i] = snapshot->pressure_fault_code[i];
     }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        put_u32_le(&payload[standby_variance_offset + ((uint16_t)i * 4u)], snapshot->pcba_standby_current_variance_ua2[i]);
+        put_u32_le(&payload[work_variance_offset + ((uint16_t)i * 4u)], snapshot->pcba_work_current_variance_ua2[i]);
+        for (uint8_t sample = 0u; sample < USB_CTRL_CURRENT_SAMPLE_COUNT; ++sample) {
+            const uint16_t sample_offset = (uint16_t)(((uint16_t)i * USB_CTRL_CURRENT_SAMPLE_COUNT) + sample) * 4u;
+            put_u32_le(&payload[standby_samples_offset + sample_offset],
+                       snapshot->pcba_standby_current_samples_ua_x100[i][sample]);
+            put_u32_le(&payload[work_samples_offset + sample_offset],
+                       snapshot->pcba_work_current_samples_ua_x100[i][sample]);
+        }
+    }
+    payload[single_tank_protection_offset + 0u] = snapshot->single_tank_protection_flags;
+    payload[single_tank_protection_offset + 1u] = snapshot->single_tank_protection_reason;
+    payload[single_tank_protection_offset + 2u] = snapshot->single_tank_protection_tank_index;
+    payload[single_tank_protection_offset + 3u] = snapshot->single_tank_protection_sensor_index;
+    payload[single_tank_protection_offset + 4u] = snapshot->single_tank_protection_inlet_valve;
+    payload[single_tank_protection_offset + 5u] = snapshot->reserved0;
+    payload[single_tank_protection_offset + 6u] = snapshot->reserved1;
+    payload[single_tank_protection_offset + 7u] = snapshot->reserved2;
+    for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        put_u16_le(&payload[math_saturation_event_offset + ((uint16_t)i * 2u)],
+                   snapshot->pressure_math_saturation_event_count[i]);
+        put_u16_le(&payload[math_saturation_attempt_offset + ((uint16_t)i * 2u)],
+                   snapshot->pressure_math_saturation_attempt_count[i]);
+        put_u16_le(&payload[math_saturation_success_offset + ((uint16_t)i * 2u)],
+                   snapshot->pressure_math_saturation_success_count[i]);
+    }
 
     *payload_len = USB_CTRL_STATUS_SNAPSHOT_LEN;
     return true;
@@ -328,6 +383,20 @@ bool UsbCtrl_UnpackStatusSnapshot(const uint8_t *payload,
                                   uint16_t payload_len,
                                   UsbCtrlStatusSnapshot *snapshot)
 {
+    const uint16_t standby_variance_offset = USB_CTRL_STATUS_SNAPSHOT_BASE_LEN;
+    const uint16_t work_variance_offset = standby_variance_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * 4u);
+    const uint16_t standby_samples_offset = work_variance_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * 4u);
+    const uint16_t work_samples_offset =
+        standby_samples_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * USB_CTRL_CURRENT_SAMPLE_COUNT * 4u);
+    const uint16_t single_tank_protection_offset =
+        work_samples_offset + (USB_CTRL_PCBA_CHANNEL_COUNT * USB_CTRL_CURRENT_SAMPLE_COUNT * 4u);
+    const uint16_t math_saturation_event_offset =
+        single_tank_protection_offset + USB_CTRL_STATUS_SNAPSHOT_SINGLE_TANK_PROTECTION_LEN;
+    const uint16_t math_saturation_attempt_offset =
+        math_saturation_event_offset + (USB_CTRL_PRESSURE_SENSOR_COUNT * 2u);
+    const uint16_t math_saturation_success_offset =
+        math_saturation_attempt_offset + (USB_CTRL_PRESSURE_SENSOR_COUNT * 2u);
+
     if (payload == 0 || snapshot == 0 || payload_len != USB_CTRL_STATUS_SNAPSHOT_LEN) {
         return false;
     }
@@ -377,6 +446,33 @@ bool UsbCtrl_UnpackStatusSnapshot(const uint8_t *payload,
     for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
         snapshot->pressure_status_byte[i] = payload[224u + i];
         snapshot->pressure_fault_code[i] = payload[238u + i];
+    }
+    for (uint8_t i = 0u; i < USB_CTRL_PCBA_CHANNEL_COUNT; ++i) {
+        snapshot->pcba_standby_current_variance_ua2[i] = get_u32_le(&payload[standby_variance_offset + ((uint16_t)i * 4u)]);
+        snapshot->pcba_work_current_variance_ua2[i] = get_u32_le(&payload[work_variance_offset + ((uint16_t)i * 4u)]);
+        for (uint8_t sample = 0u; sample < USB_CTRL_CURRENT_SAMPLE_COUNT; ++sample) {
+            const uint16_t sample_offset = (uint16_t)(((uint16_t)i * USB_CTRL_CURRENT_SAMPLE_COUNT) + sample) * 4u;
+            snapshot->pcba_standby_current_samples_ua_x100[i][sample] =
+                get_u32_le(&payload[standby_samples_offset + sample_offset]);
+            snapshot->pcba_work_current_samples_ua_x100[i][sample] =
+                get_u32_le(&payload[work_samples_offset + sample_offset]);
+        }
+    }
+    snapshot->single_tank_protection_flags = payload[single_tank_protection_offset + 0u];
+    snapshot->single_tank_protection_reason = payload[single_tank_protection_offset + 1u];
+    snapshot->single_tank_protection_tank_index = payload[single_tank_protection_offset + 2u];
+    snapshot->single_tank_protection_sensor_index = payload[single_tank_protection_offset + 3u];
+    snapshot->single_tank_protection_inlet_valve = payload[single_tank_protection_offset + 4u];
+    snapshot->reserved0 = payload[single_tank_protection_offset + 5u];
+    snapshot->reserved1 = payload[single_tank_protection_offset + 6u];
+    snapshot->reserved2 = payload[single_tank_protection_offset + 7u];
+    for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
+        snapshot->pressure_math_saturation_event_count[i] =
+            get_u16_le(&payload[math_saturation_event_offset + ((uint16_t)i * 2u)]);
+        snapshot->pressure_math_saturation_attempt_count[i] =
+            get_u16_le(&payload[math_saturation_attempt_offset + ((uint16_t)i * 2u)]);
+        snapshot->pressure_math_saturation_success_count[i] =
+            get_u16_le(&payload[math_saturation_success_offset + ((uint16_t)i * 2u)]);
     }
 
     return true;
@@ -447,7 +543,6 @@ static uint8_t usb_control_write_all(const uint8_t *data, uint16_t len)
 void AppUsbControl_Task(void)
 {
     int read_len;
-    UsbCtrlFrame frame;
     size_t consumed;
     UsbCtrlParseResult parse_result;
     uint32_t now;
@@ -477,7 +572,10 @@ void AppUsbControl_Task(void)
 
     while (s_usb_ctrl.rx_len > 0u) {
         consumed = 0u;
-        parse_result = UsbCtrl_ParseFrame(s_usb_ctrl.rx_buf, s_usb_ctrl.rx_len, &frame, &consumed);
+        parse_result = UsbCtrl_ParseFrame(s_usb_ctrl.rx_buf,
+                                          s_usb_ctrl.rx_len,
+                                          &s_rx_frame_scratch,
+                                          &consumed);
         if (parse_result == USB_CTRL_PARSE_NEED_MORE) {
 #if APP_PC_LINK_JLINK_RTT_ENABLED
             if (s_usb_ctrl.rx_len < USB_CTRL_MIN_FRAME_SIZE) {
@@ -502,7 +600,7 @@ void AppUsbControl_Task(void)
 #if APP_PC_LINK_JLINK_RTT_ENABLED
             AppJlinkRttControl_DebugText("USB_PARSE_OK\n");
 #endif
-            handle_frame(&frame);
+            handle_frame(&s_rx_frame_scratch);
         } else if (parse_result == USB_CTRL_PARSE_BAD_CRC) {
 #if APP_PC_LINK_JLINK_RTT_ENABLED
             AppJlinkRttControl_DebugText("USB_PARSE_BAD_CRC\n");
@@ -542,10 +640,8 @@ int AppUsbControl_BuildCurrentStatus(uint8_t frame_type,
                                      uint16_t out_size)
 {
     uint16_t payload_len = 0u;
-    UsbCtrlStatusSnapshot snapshot;
-
-    collect_status_snapshot(sequence, &snapshot);
-    if (!UsbCtrl_PackStatusSnapshot(&snapshot, s_status_payload, &payload_len)) {
+    collect_status_snapshot(sequence, &s_status_snapshot_scratch);
+    if (!UsbCtrl_PackStatusSnapshot(&s_status_snapshot_scratch, s_status_payload, &payload_len)) {
         return 0;
     }
 
@@ -596,6 +692,7 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
     uint16_t work_current_valid_mask = 0u;
     uint32_t pressure_valid_mask = 0u;
     uint32_t tolerance = AppStateMachine_GetPressureTolerance001mmHg();
+    AppSensorCalibrationStatus calibration_status;
     uint32_t target_hold_pressure_mmhg = USB_CTRL_DEFAULT_HOLD_PRESSURE_MMHG;
 
     if (snapshot == 0) {
@@ -633,6 +730,14 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
         snapshot->pcba_work_current_ua_x100[ch] =
             current_ua_to_x100(AppCurrent_GetWorkUa((uint8_t)(ch + 1u)));
         snapshot->pcba_current_raw_adc[ch] = AppCurrent_GetRaw((uint8_t)(ch + 1u));
+        snapshot->pcba_standby_current_variance_ua2[ch] = AppCurrent_GetStandbyVarianceUa2((uint8_t)(ch + 1u));
+        snapshot->pcba_work_current_variance_ua2[ch] = AppCurrent_GetWorkVarianceUa2((uint8_t)(ch + 1u));
+        for (uint8_t sample = 0u; sample < USB_CTRL_CURRENT_SAMPLE_COUNT; ++sample) {
+            snapshot->pcba_standby_current_samples_ua_x100[ch][sample] =
+                AppCurrent_GetStandbySampleUaX100((uint8_t)(ch + 1u), sample);
+            snapshot->pcba_work_current_samples_ua_x100[ch][sample] =
+                AppCurrent_GetWorkSampleUaX100((uint8_t)(ch + 1u), sample);
+        }
         if (AppCurrent_IsStandbyValid((uint8_t)(ch + 1u)) != 0u) {
             standby_current_valid_mask |= (uint16_t)(1u << ch);
         }
@@ -672,8 +777,8 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
     snapshot->pcba_work_current_valid_mask = work_current_valid_mask;
     snapshot->rtc_epoch_seconds = AppRtc_GetEpochSeconds();
     snapshot->rtc_flags = AppRtc_GetFlags();
-    snapshot->pcba_current_flags = (AppStateMachine_GetState() == APP_STATE_PCBA_CURRENT_TEST &&
-                                    AppPower_Is50mATestCircuitEnabled() != 0u) ? 0x01u : 0u;
+    snapshot->pcba_current_flags =
+        AppPower_Is50mATestCircuitEnabled() != 0u ? 0x01u : 0u;
     snapshot->pcba_power_flags = 0u;
     snapshot->pcba_power_flags |= AppPower_Is5VEnabled() != 0u ? 0x01u : 0u;
     snapshot->pcba_power_flags |= AppPower_Is45VEnabled() != 0u ? 0x02u : 0u;
@@ -683,6 +788,23 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
     snapshot->adc_calibration_flags = AppAdcCalibration_GetFlags();
     snapshot->pressure_fault_latched_mask =
         (uint16_t)(AppPressure_GetFaultLatchedMask() & 0x3FFFu);
+    snapshot->single_tank_protection_flags =
+        AppStateMachine_IsSingleTankProtectionActive() != 0u ? 0x01u : 0x00u;
+    snapshot->single_tank_protection_reason = AppStateMachine_GetSingleTankProtectionReason();
+    snapshot->single_tank_protection_tank_index = AppStateMachine_GetSingleTankProtectionTankIndex();
+    snapshot->single_tank_protection_sensor_index = AppStateMachine_GetSingleTankProtectionSensorIndex();
+    snapshot->single_tank_protection_inlet_valve = AppStateMachine_GetSingleTankProtectionInletValve();
+    AppSensorCalibration_GetStatus(0u, &calibration_status);
+    snapshot->reserved0 = (uint8_t)calibration_status.calibrated_mask;
+    snapshot->reserved1 = (uint8_t)(calibration_status.calibrated_mask >> 8);
+    snapshot->reserved2 = (uint8_t)(calibration_status.actuator & 0x03u);
+    if ((calibration_status.flags & 0x01u) != 0u) {
+        snapshot->reserved2 |= 0x04u;
+    }
+    snapshot->reserved2 |= (uint8_t)((calibration_status.captured_mask & 0x0Fu) << 3);
+    if ((calibration_status.flags & 0x80u) != 0u) {
+        snapshot->reserved2 |= 0x80u;
+    }
 
     for (uint8_t i = 0u; i < USB_CTRL_PRESSURE_SENSOR_COUNT; ++i) {
         if (AppPressure_IsValid((PressureSensorIndex)i) != 0) {
@@ -691,18 +813,23 @@ static void collect_status_snapshot(uint16_t sequence, UsbCtrlStatusSnapshot *sn
         snapshot->pressure_001mmhg[i] = AppPressure_Get001mmHg((PressureSensorIndex)i);
         snapshot->pressure_status_byte[i] = AppPressure_GetStatusByte((PressureSensorIndex)i);
         snapshot->pressure_fault_code[i] = AppPressure_GetFaultCode((PressureSensorIndex)i);
+        snapshot->pressure_math_saturation_event_count[i] =
+            AppPressure_GetMathSaturationEventCount((PressureSensorIndex)i);
+        snapshot->pressure_math_saturation_attempt_count[i] =
+            AppPressure_GetMathSaturationAttemptCount((PressureSensorIndex)i);
+        snapshot->pressure_math_saturation_success_count[i] =
+            AppPressure_GetMathSaturationSuccessCount((PressureSensorIndex)i);
     }
     snapshot->pressure_valid_mask = pressure_valid_mask;
 }
 
 static void send_status(uint8_t frame_type, uint16_t sequence)
 {
-    UsbCtrlStatusSnapshot snapshot;
     uint16_t payload_len = 0u;
     size_t len;
 
-    collect_status_snapshot(sequence, &snapshot);
-    if (!UsbCtrl_PackStatusSnapshot(&snapshot, s_status_payload, &payload_len)) {
+    collect_status_snapshot(sequence, &s_status_snapshot_scratch);
+    if (!UsbCtrl_PackStatusSnapshot(&s_status_snapshot_scratch, s_status_payload, &payload_len)) {
         return;
     }
 
@@ -720,33 +847,36 @@ static void send_status(uint8_t frame_type, uint16_t sequence)
 
 static void send_pcba_timing(uint16_t sequence)
 {
-    AppPcbaTimingReport report;
-    uint8_t payload[4u + (APP_PCBA_TIMING_STEP_COUNT * 40u)];
     uint16_t payload_len = 4u;
 
-    AppStateMachine_GetPcbaTimingReport(&report);
-    payload[0] = report.running;
-    payload[1] = report.done;
-    payload[2] = report.count;
-    payload[3] = report.final_result;
+    AppStateMachine_GetPcbaTimingReport(&s_pcba_timing_report_scratch);
+    s_pcba_timing_payload[0] = s_pcba_timing_report_scratch.running;
+    s_pcba_timing_payload[1] = s_pcba_timing_report_scratch.done;
+    s_pcba_timing_payload[2] = s_pcba_timing_report_scratch.count;
+    s_pcba_timing_payload[3] = s_pcba_timing_report_scratch.final_result;
 
-    for (uint8_t i = 0u; i < report.count && i < APP_PCBA_TIMING_STEP_COUNT; ++i) {
+    for (uint8_t i = 0u;
+         i < s_pcba_timing_report_scratch.count && i < APP_PCBA_TIMING_STEP_COUNT;
+         ++i) {
         uint16_t base = (uint16_t)(4u + (i * 40u));
-        payload[base + 0u] = report.entries[i].kind;
-        payload[base + 1u] = report.entries[i].cmd_sent;
-        payload[base + 2u] = report.entries[i].ok;
-        payload[base + 3u] = report.entries[i].resp_cmd_or_byte;
-        payload[base + 4u] = report.entries[i].resp_channel;
-        payload[base + 5u] = report.entries[i].resp_len;
-        payload[base + 6u] = report.entries[i].resp_data0;
-        payload[base + 7u] = report.entries[i].resp_data1;
-        payload[base + 8u] = report.entries[i].resp_data2;
-        payload[base + 9u] = report.entries[i].resp_data3;
-        payload[base + 10u] = report.entries[i].raw_len;
-        payload[base + 11u] = 0u;
-        put_u32_le(&payload[base + 12u], report.entries[i].elapsed_us);
+        s_pcba_timing_payload[base + 0u] = s_pcba_timing_report_scratch.entries[i].kind;
+        s_pcba_timing_payload[base + 1u] = s_pcba_timing_report_scratch.entries[i].cmd_sent;
+        s_pcba_timing_payload[base + 2u] = s_pcba_timing_report_scratch.entries[i].ok;
+        s_pcba_timing_payload[base + 3u] = s_pcba_timing_report_scratch.entries[i].resp_cmd_or_byte;
+        s_pcba_timing_payload[base + 4u] = s_pcba_timing_report_scratch.entries[i].resp_channel;
+        s_pcba_timing_payload[base + 5u] = s_pcba_timing_report_scratch.entries[i].resp_len;
+        s_pcba_timing_payload[base + 6u] = s_pcba_timing_report_scratch.entries[i].resp_data0;
+        s_pcba_timing_payload[base + 7u] = s_pcba_timing_report_scratch.entries[i].resp_data1;
+        s_pcba_timing_payload[base + 8u] = s_pcba_timing_report_scratch.entries[i].resp_data2;
+        s_pcba_timing_payload[base + 9u] = s_pcba_timing_report_scratch.entries[i].resp_data3;
+        s_pcba_timing_payload[base + 10u] = s_pcba_timing_report_scratch.entries[i].raw_len;
+        s_pcba_timing_payload[base + 11u] = 0u;
+        put_u32_le(&s_pcba_timing_payload[base + 12u],
+                   s_pcba_timing_report_scratch.entries[i].elapsed_us);
         for (uint8_t raw_i = 0u; raw_i < APP_PCBA_REPORT_RAW_MAX; ++raw_i) {
-            payload[base + 16u + raw_i] = raw_i < report.entries[i].raw_len ? report.entries[i].raw[raw_i] : 0u;
+            s_pcba_timing_payload[base + 16u + raw_i] =
+                raw_i < s_pcba_timing_report_scratch.entries[i].raw_len ?
+                s_pcba_timing_report_scratch.entries[i].raw[raw_i] : 0u;
         }
         payload_len = (uint16_t)(base + 40u);
     }
@@ -754,7 +884,7 @@ static void send_pcba_timing(uint16_t sequence)
     size_t len = UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
                                     sequence,
                                     USB_CTRL_CMD_GET_PCBA_TIMING,
-                                    payload,
+                                    s_pcba_timing_payload,
                                     payload_len,
                                     s_tx_frame,
                                     sizeof(s_tx_frame));
@@ -763,63 +893,113 @@ static void send_pcba_timing(uint16_t sequence)
     }
 }
 
-static void send_single_tank_pcba(uint16_t sequence)
+static void send_single_tank_pcba(uint8_t frame_type, uint16_t sequence)
 {
-    AppSingleTankPcbaReport report;
-    uint8_t payload[12u + (APP_SINGLE_TANK_PCBA_STEP_COUNT * 52u)];
     uint16_t payload_len = 12u;
 
-    AppStateMachine_GetSingleTankPcbaReport(&report);
-    payload[0] = report.running;
-    payload[1] = report.done;
-    payload[2] = report.count;
-    payload[3] = report.final_result;
-    put_u32_le(&payload[4], report.standby_current_ua_x100);
-    put_u32_le(&payload[8], report.work_current_ua_x100);
+    AppStateMachine_GetSingleTankPcbaReport(&s_single_tank_pcba_report_scratch);
+    s_single_tank_pcba_payload[0] = s_single_tank_pcba_report_scratch.running;
+    s_single_tank_pcba_payload[1] = s_single_tank_pcba_report_scratch.done;
+    s_single_tank_pcba_payload[2] = s_single_tank_pcba_report_scratch.count;
+    s_single_tank_pcba_payload[3] = s_single_tank_pcba_report_scratch.final_result;
+    put_u32_le(&s_single_tank_pcba_payload[4], s_single_tank_pcba_report_scratch.standby_current_ua_x100);
+    put_u32_le(&s_single_tank_pcba_payload[8], s_single_tank_pcba_report_scratch.work_current_ua_x100);
 
-    for (uint8_t i = 0u; i < report.count && i < APP_SINGLE_TANK_PCBA_STEP_COUNT; ++i) {
+    for (uint8_t i = 0u;
+         i < s_single_tank_pcba_report_scratch.count && i < APP_SINGLE_TANK_PCBA_STEP_COUNT;
+         ++i) {
         uint16_t base = (uint16_t)(12u + (i * 52u));
-        payload[base + 0u] = report.entries[i].kind;
-        payload[base + 1u] = report.entries[i].cmd_sent;
-        payload[base + 2u] = report.entries[i].ok;
-        payload[base + 3u] = report.entries[i].flags;
-        payload[base + 4u] = report.entries[i].resp_cmd_or_byte;
-        payload[base + 5u] = report.entries[i].resp_channel;
-        payload[base + 6u] = report.entries[i].resp_len;
-        payload[base + 7u] = report.entries[i].resp_data0;
-        payload[base + 8u] = report.entries[i].resp_data1;
-        payload[base + 9u] = report.entries[i].resp_data2;
-        payload[base + 10u] = report.entries[i].resp_data3;
-        payload[base + 11u] = 0u;
-        put_u32_le(&payload[base + 12u], report.entries[i].current_ua_x100);
-        put_u32_le(&payload[base + 16u], report.entries[i].elapsed_us);
-        put_u32_le(&payload[base + 20u], report.entries[i].parsed_value);
-        payload[base + 24u] = report.entries[i].raw_len;
-        payload[base + 25u] = 0u;
-        payload[base + 26u] = 0u;
-        payload[base + 27u] = 0u;
+        s_single_tank_pcba_payload[base + 0u] = s_single_tank_pcba_report_scratch.entries[i].kind;
+        s_single_tank_pcba_payload[base + 1u] = s_single_tank_pcba_report_scratch.entries[i].cmd_sent;
+        s_single_tank_pcba_payload[base + 2u] = s_single_tank_pcba_report_scratch.entries[i].ok;
+        s_single_tank_pcba_payload[base + 3u] = s_single_tank_pcba_report_scratch.entries[i].flags;
+        s_single_tank_pcba_payload[base + 4u] = s_single_tank_pcba_report_scratch.entries[i].resp_cmd_or_byte;
+        s_single_tank_pcba_payload[base + 5u] = s_single_tank_pcba_report_scratch.entries[i].resp_channel;
+        s_single_tank_pcba_payload[base + 6u] = s_single_tank_pcba_report_scratch.entries[i].resp_len;
+        s_single_tank_pcba_payload[base + 7u] = s_single_tank_pcba_report_scratch.entries[i].resp_data0;
+        s_single_tank_pcba_payload[base + 8u] = s_single_tank_pcba_report_scratch.entries[i].resp_data1;
+        s_single_tank_pcba_payload[base + 9u] = s_single_tank_pcba_report_scratch.entries[i].resp_data2;
+        s_single_tank_pcba_payload[base + 10u] = s_single_tank_pcba_report_scratch.entries[i].resp_data3;
+        s_single_tank_pcba_payload[base + 11u] = 0u;
+        put_u32_le(&s_single_tank_pcba_payload[base + 12u],
+                   s_single_tank_pcba_report_scratch.entries[i].current_ua_x100);
+        put_u32_le(&s_single_tank_pcba_payload[base + 16u],
+                   s_single_tank_pcba_report_scratch.entries[i].elapsed_us);
+        put_u32_le(&s_single_tank_pcba_payload[base + 20u],
+                   s_single_tank_pcba_report_scratch.entries[i].parsed_value);
+        s_single_tank_pcba_payload[base + 24u] = s_single_tank_pcba_report_scratch.entries[i].raw_len;
+        s_single_tank_pcba_payload[base + 25u] = 0u;
+        s_single_tank_pcba_payload[base + 26u] = 0u;
+        s_single_tank_pcba_payload[base + 27u] = 0u;
         for (uint8_t raw_i = 0u; raw_i < APP_PCBA_REPORT_RAW_MAX; ++raw_i) {
-            payload[base + 28u + raw_i] = raw_i < report.entries[i].raw_len ? report.entries[i].raw[raw_i] : 0u;
+            s_single_tank_pcba_payload[base + 28u + raw_i] =
+                raw_i < s_single_tank_pcba_report_scratch.entries[i].raw_len ?
+                s_single_tank_pcba_report_scratch.entries[i].raw[raw_i] : 0u;
         }
         payload_len = (uint16_t)(base + 52u);
     }
 
-    size_t len = UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
+    size_t len = UsbCtrl_BuildFrame(frame_type,
                                     sequence,
                                     USB_CTRL_CMD_GET_SINGLE_TANK_PCBA,
-                                    payload,
+                                    s_single_tank_pcba_payload,
                                     payload_len,
                                     s_tx_frame,
                                     sizeof(s_tx_frame));
     if (len > 0u) {
         (void)usb_control_write_all(s_tx_frame, (uint16_t)len);
     }
+}
+
+static void send_sensor_calibration_status(uint16_t sequence, uint8_t selected_slot)
+{
+    AppSensorCalibrationStatus status;
+    size_t len;
+
+    AppSensorCalibration_GetStatus(selected_slot, &status);
+    for (uint8_t i = 0u; i < sizeof(s_sensor_calibration_payload); ++i) {
+        s_sensor_calibration_payload[i] = 0u;
+    }
+    s_sensor_calibration_payload[0] = 1u;
+    s_sensor_calibration_payload[1] = status.flags;
+    s_sensor_calibration_payload[2] = (uint8_t)(status.actuator & 0x03u);
+    if (status.in_place_mode != 0u) {
+        s_sensor_calibration_payload[2] |= 0x04u;
+    }
+    s_sensor_calibration_payload[3] = status.captured_mask;
+    put_u16_le(&s_sensor_calibration_payload[4], status.calibrated_mask);
+    s_sensor_calibration_payload[6] = status.selected_slot;
+    s_sensor_calibration_payload[7] = status.last_detail;
+    put_u32_le(&s_sensor_calibration_payload[8], status.live_raw_average);
+    put_u32_le(&s_sensor_calibration_payload[12], status.live_nominal_001mmhg);
+    for (uint8_t anchor = 0u; anchor < APP_PRESSURE_CAL_ANCHOR_COUNT; ++anchor) {
+        const uint8_t base = (uint8_t)(16u + (anchor * 8u));
+        put_u32_le(&s_sensor_calibration_payload[base], status.profile.raw[anchor]);
+        put_u32_le(&s_sensor_calibration_payload[base + 4u],
+                   status.profile.pressure_001mmhg[anchor]);
+    }
+
+    len = UsbCtrl_BuildFrame(USB_CTRL_FRAME_RESPONSE,
+                             sequence,
+                             USB_CTRL_CMD_GET_SENSOR_CAL_STATUS,
+                             s_sensor_calibration_payload,
+                             sizeof(s_sensor_calibration_payload),
+                             s_tx_frame,
+                             sizeof(s_tx_frame));
+    if (len > 0u) {
+        (void)usb_control_write_all(s_tx_frame, (uint16_t)len);
+    }
+}
+
+void AppUsbControl_PublishSingleTankPcbaReport(void)
+{
+    send_single_tank_pcba(USB_CTRL_FRAME_REPORT, s_usb_ctrl.report_sequence++);
 }
 
 static void handle_hello(const UsbCtrlFrame *frame)
 {
     uint8_t payload[6];
-    uint8_t capability = 0x03u;
+    uint8_t capability = 0x07u;
     size_t len;
 
 #if APP_PC_LINK_JLINK_RTT_ENABLED
@@ -1036,19 +1216,121 @@ static void handle_frame(const UsbCtrlFrame *frame)
         return;
 
     case USB_CTRL_CMD_RUN_SINGLE_TANK_PCBA:
-        if (frame->length != 0u) {
+    {
+        uint8_t continue_on_fail = 0u;
+        uint32_t trend_max_residual_001mmhg =
+            APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_DEFAULT_001MMHG;
+        uint32_t trend_window_ms = APP_SINGLE_TANK_PCBA_TREND_WINDOW_DEFAULT_MS;
+        uint32_t max_drop_rate_001mmhg_per_s =
+            APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_DEFAULT_001MMHG_PER_S;
+
+        if (frame->length != 0u && frame->length != 1u && frame->length != 13u) {
             send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
             return;
         }
-        rc = AppStateMachine_RequestSingleTankPcbaDiagnostic();
+        if (frame->length > 0u) {
+            continue_on_fail = frame->payload[0];
+        }
+        if (continue_on_fail > 1u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        if (frame->length == 13u) {
+            trend_max_residual_001mmhg = get_u32_le(&frame->payload[1]);
+            trend_window_ms = get_u32_le(&frame->payload[5]);
+            max_drop_rate_001mmhg_per_s = get_u32_le(&frame->payload[9]);
+            if (trend_max_residual_001mmhg <
+                    APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_MIN_001MMHG ||
+                trend_max_residual_001mmhg >
+                    APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_MAX_001MMHG ||
+                trend_window_ms < APP_SINGLE_TANK_PCBA_TREND_WINDOW_MIN_MS ||
+                trend_window_ms > APP_SINGLE_TANK_PCBA_TREND_WINDOW_MAX_MS ||
+                max_drop_rate_001mmhg_per_s <
+                    APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_MIN_001MMHG_PER_S ||
+                max_drop_rate_001mmhg_per_s >
+                    APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_LIMIT_001MMHG_PER_S) {
+                send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+                return;
+            }
+        }
+        rc = AppStateMachine_RequestSingleTankPcbaDiagnostic(
+            continue_on_fail,
+            trend_max_residual_001mmhg,
+            trend_window_ms,
+            max_drop_rate_001mmhg_per_s);
         break;
+    }
 
     case USB_CTRL_CMD_GET_SINGLE_TANK_PCBA:
         if (frame->length != 0u) {
             send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
             return;
         }
-        send_single_tank_pcba(frame->sequence);
+        send_single_tank_pcba(USB_CTRL_FRAME_RESPONSE, frame->sequence);
+        return;
+
+    case USB_CTRL_CMD_SENSOR_CAL_ACTION: {
+        AppSensorCalibrationRequest request;
+        const AppSensorCalibrationRequestResult decode_result =
+            AppSensorCalibration_DecodeRequest(frame->payload, frame->length, &request);
+
+        if (decode_result == APP_SENSOR_CAL_REQUEST_BAD_LENGTH) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        if (decode_result != APP_SENSOR_CAL_REQUEST_OK) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        switch (request.operation) {
+        case 1u:
+            rc = AppStateMachine_RequestSensorCalibrationEnter(
+                request.mode, (uint8_t)(request.slot - 1u));
+            break;
+        case 2u:
+            rc = AppStateMachine_RequestSensorCalibrationExit();
+            break;
+        case 3u:
+            rc = AppStateMachine_SensorCalibrationJog(request.actuator, request.lease_ms);
+            break;
+        case 4u:
+            rc = AppStateMachine_SensorCalibrationStartAutoVent();
+            break;
+        case 5u:
+            rc = AppStateMachine_SensorCalibrationCancelAutoVent();
+            break;
+        case 6u:
+            rc = AppStateMachine_SensorCalibrationRecord(request.point_index,
+                                                          request.actual_001mmhg);
+            break;
+        case 7u:
+            rc = AppStateMachine_SensorCalibrationSaveSlot((uint8_t)(request.slot - 1u));
+            break;
+        case 8u:
+            rc = AppStateMachine_SensorCalibrationClearSlot((uint8_t)(request.slot - 1u));
+            break;
+        case 9u:
+            rc = AppStateMachine_SensorCalibrationResetSession();
+            break;
+        default:
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        break;
+    }
+
+    case USB_CTRL_CMD_GET_SENSOR_CAL_STATUS:
+        if (frame->length > 1u) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_LENGTH);
+            return;
+        }
+        if (frame->length == 1u &&
+            (frame->payload[0] < 1u || frame->payload[0] > APP_PRESSURE_SENSOR_COUNT)) {
+            send_nak(frame->sequence, frame->command, USB_CTRL_ERROR_BAD_VALUE);
+            return;
+        }
+        send_sensor_calibration_status(frame->sequence,
+                                       frame->length == 1u ? frame->payload[0] : 0u);
         return;
 
     default:

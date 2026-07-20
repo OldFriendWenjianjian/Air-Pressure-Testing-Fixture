@@ -22,6 +22,10 @@ public:
         QString portName;
         QString displayName;
         QString description;
+        QString productName;
+        QString serialNumber;
+        QString instanceId;
+        bool isFixtureUsbCdc = false;
         bool isSegger = false;
         bool isRtt = false;
     };
@@ -31,6 +35,9 @@ public:
 
     static QVector<PortInfo> availablePortInfos();
     static QStringList availablePorts();
+    static bool isFixtureUsbIdentity(const QString &instanceId,
+                                     const QString &productName,
+                                     const QString &serialNumber);
     bool open(const QString &portName, int baudRate = 115200);
     void close();
     bool isOpen() const;

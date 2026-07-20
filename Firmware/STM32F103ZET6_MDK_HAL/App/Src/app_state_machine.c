@@ -5,7 +5,13 @@
 #include "app_pcba_uart.h"
 #include "app_power.h"
 #include "app_pressure.h"
+#include "app_pressure_calibration.h"
+#include "app_pressure_scope_logic.h"
+#include "app_pressure_settle_logic.h"
+#include "app_pressure_trend_logic.h"
+#include "app_pressure_vent_logic.h"
 #include "app_protocol.h"
+#include "app_sensor_calibration.h"
 #include "app_usb_control.h"
 #include "app_valves.h"
 #include "board_pins.h"
@@ -30,6 +36,9 @@ typedef struct {
     uint32_t manual_valve_override_mask;
     uint32_t manual_valve_open_mask;
     uint32_t pressure_tolerance_001mmhg;
+    uint32_t single_tank_pcba_trend_max_residual_001mmhg;
+    uint32_t single_tank_pcba_trend_window_ms;
+    uint32_t single_tank_pcba_max_drop_rate_001mmhg_per_s;
     uint8_t single_tank_active;
     uint8_t single_tank_index;
     uint32_t single_tank_target_001mmhg;
@@ -42,8 +51,14 @@ typedef struct {
     uint8_t single_tank_last_settled_valid;
     uint8_t single_tank_last_pulse_mode;
     uint32_t single_tank_last_refill_reference_001mmhg;
+    uint32_t single_tank_last_refill_progress_at;
     uint8_t single_tank_last_refill_reference_valid;
     uint8_t single_tank_refill_no_rise_count;
+    uint8_t single_tank_protection_active;
+    uint8_t single_tank_protection_reason;
+    uint8_t single_tank_protection_tank_index;
+    uint8_t single_tank_protection_sensor_index;
+    uint8_t single_tank_protection_inlet_valve;
 } AppContext;
 
 static AppContext s_app;
@@ -52,6 +67,7 @@ static AppPcbaTimingReport s_pcba_timing_report;
 static AppSingleTankPcbaReport s_single_tank_pcba_report;
 static uint8_t s_pcba_timing_requested;
 static uint8_t s_single_tank_pcba_requested;
+static uint8_t s_single_tank_pcba_continue_on_fail;
 static uint32_t s_pcba_timing_pass_count;
 static uint32_t s_pcba_timing_fail_count;
 static uint8_t s_pcba_timing_stop_on_fail;
@@ -84,8 +100,20 @@ typedef enum {
     SINGLE_TANK_PHASE_PULSE_REFILL,
     SINGLE_TANK_PHASE_PULSE_RELIEF,
     SINGLE_TANK_PHASE_SETTLING,
-    SINGLE_TANK_PHASE_SAMPLING
+    SINGLE_TANK_PHASE_SAMPLING,
+    SINGLE_TANK_PHASE_PROTECTED
 } SingleTankLoopPhase;
+
+typedef enum {
+    SINGLE_TANK_PCBA_PRESSURE_ABORT = 0u,
+    SINGLE_TANK_PCBA_PRESSURE_SKIPPED,
+    SINGLE_TANK_PCBA_PRESSURE_READY
+} SingleTankPcbaPressureStepResult;
+
+typedef struct {
+    AppPressureTrendFit fit;
+    uint32_t last_pressure_001mmhg;
+} SingleTankPcbaTrendCapture;
 
 static const TankLoopSpec s_tank_loop_specs[APP_TANK_COUNT] = {
     {PRESSURE_SENSOR_TANK_50,  1u,  2u, 21u, APP_PRESSURE_50_MMHG},
@@ -126,7 +154,8 @@ static const char *const s_state_names[APP_STATE_COUNT] = {
     "Single tank loop",
     "Single PCBA flow",
     "PCBA pressure query",
-    "PCBA write flash"
+    "PCBA write flash",
+    "Sensor calibration"
 };
 
 static void reset_single_tank_loop_context(void);
@@ -135,6 +164,7 @@ static void single_tank_start_settling(void);
 static void single_tank_start_sampling(void);
 static void single_tank_start_fast_refill(const TankLoopSpec *tank, uint32_t current_pressure_001mmhg);
 static void single_tank_start_pulse(const TankLoopSpec *tank, SingleTankPulseMode mode);
+static void single_tank_trip_protection(uint8_t tank_index, AppSingleTankProtectionReason reason);
 static void single_tank_loop_task(void);
 static void clear_manual_valve_overrides(void);
 static uint8_t pressure_sensor_fault_active(PressureSensorIndex sensor);
@@ -143,7 +173,8 @@ static uint8_t any_tank_sensor_fault_active(void);
 static uint8_t any_output_sensor_fault_active(void);
 static uint8_t output_sensor_fault_active(uint8_t channel_index);
 static uint32_t pressure_hard_limit_001mmhg(uint32_t target_001mmhg);
-static uint32_t single_tank_fast_refill_threshold_001mmhg(uint32_t target_001mmhg);
+static uint32_t single_tank_fast_refill_threshold_001mmhg(uint32_t target_001mmhg,
+                                                          uint32_t tolerance_001mmhg);
 static uint8_t pressure_above_limit_active(PressureSensorIndex sensor, uint32_t limit_001mmhg);
 static uint8_t any_tank_pressure_above_default_limits_active(void);
 static uint8_t any_output_pressure_above_limit_active(uint32_t target_001mmhg);
@@ -153,6 +184,7 @@ static void reset_pcba_result_flags(void);
 static void reset_pcba_timing_report(void);
 static void reset_single_tank_pcba_report(void);
 static void diagnostic_delay_ms(uint32_t delay_ms);
+static uint8_t single_tank_pcba_diagnostic_active(void);
 static void store_pcba_timing_entry(uint8_t kind,
                                     uint8_t cmd_sent,
                                     uint8_t ok,
@@ -169,10 +201,41 @@ static void store_single_tank_pcba_entry(uint8_t kind,
                                          uint32_t current_ua_x100,
                                          uint32_t elapsed_us,
                                          uint32_t parsed_value);
+static void store_single_tank_pcba_entry_deferred(uint8_t kind,
+                                                  uint8_t cmd_sent,
+                                                  uint8_t ok,
+                                                  uint8_t flags,
+                                                  const PcbaFrame *response,
+                                                  uint32_t current_ua_x100,
+                                                  uint32_t elapsed_us,
+                                                  uint32_t parsed_value);
 static void update_last_pcba_timing_raw_from_frame(const PcbaFrame *response);
 static void update_last_pcba_timing_raw_byte(uint8_t response_byte, uint8_t valid);
 static void run_pcba_timing_diagnostic(void);
 static void run_single_tank_pcba_diagnostic(void);
+static uint8_t single_tank_pcba_drive_first_tank(uint32_t target_001mmhg,
+                                                 SingleTankPcbaTrendCapture *capture,
+                                                 uint8_t *failure_reason);
+static uint8_t single_tank_pcba_vent_zero(uint32_t *vented_pressure_001mmhg,
+                                          uint8_t *failure_reason,
+                                          uint8_t ignore_stop);
+static SingleTankPcbaPressureStepResult single_tank_pcba_prepare_pressure_step(
+    uint32_t target_001mmhg,
+    uint8_t dependent_command,
+    uint8_t flags,
+    SingleTankPcbaTrendCapture *capture);
+static uint8_t single_tank_pcba_send_ack_step(uint8_t cmd,
+                                              uint32_t payload_value,
+                                              uint8_t payload_len,
+                                              uint8_t flags,
+                                              uint32_t parsed_value);
+static uint8_t single_tank_pcba_query_pressure_step(uint32_t target_001mmhg,
+                                                    uint8_t flags,
+                                                    const SingleTankPcbaTrendCapture *capture,
+                                                    uint8_t store_trend_entry);
+static uint8_t single_tank_pcba_send_calibration_trend_step(
+    uint8_t flags,
+    const SingleTankPcbaTrendCapture *capture);
 static void pressure_test_step_single_pcba(PressureSensorIndex sensor,
                                            uint32_t target,
                                            uint8_t outlet_valve,
@@ -191,6 +254,11 @@ static void enter_state(AppRuntimeState state)
     if (previous_state == APP_STATE_SINGLE_TANK_LOOP &&
         state != APP_STATE_SINGLE_TANK_LOOP) {
         reset_single_tank_loop_context();
+    }
+    if (previous_state == APP_STATE_SENSOR_CALIBRATION &&
+        state != APP_STATE_SENSOR_CALIBRATION) {
+        AppSensorCalibration_Exit();
+        AppValves_AllClosed();
     }
 
     s_app.state = state;
@@ -211,8 +279,14 @@ static void enter_state(AppRuntimeState state)
         s_app.single_tank_sample_count = 0u;
         s_app.single_tank_last_settled_valid = 0u;
         s_app.single_tank_last_pulse_mode = SINGLE_TANK_PULSE_NONE;
+        s_app.single_tank_last_refill_progress_at = 0u;
         s_app.single_tank_last_refill_reference_valid = 0u;
         s_app.single_tank_refill_no_rise_count = 0u;
+        s_app.single_tank_protection_active = 0u;
+        s_app.single_tank_protection_reason = APP_SINGLE_TANK_PROTECTION_NONE;
+        s_app.single_tank_protection_tank_index = 0u;
+        s_app.single_tank_protection_sensor_index = 0u;
+        s_app.single_tank_protection_inlet_valve = 0u;
     }
 }
 
@@ -408,14 +482,21 @@ static void diagnostic_delay_ms(uint32_t delay_ms)
     }
 }
 
-static void store_single_tank_pcba_entry(uint8_t kind,
-                                         uint8_t cmd_sent,
-                                         uint8_t ok,
-                                         uint8_t flags,
-                                         const PcbaFrame *response,
-                                         uint32_t current_ua_x100,
-                                         uint32_t elapsed_us,
-                                         uint32_t parsed_value)
+static uint8_t single_tank_pcba_diagnostic_active(void)
+{
+    return s_app.running != 0u &&
+           s_app.state == APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC ? 1u : 0u;
+}
+
+static void store_single_tank_pcba_entry_internal(uint8_t kind,
+                                                  uint8_t cmd_sent,
+                                                  uint8_t ok,
+                                                  uint8_t flags,
+                                                  const PcbaFrame *response,
+                                                  uint32_t current_ua_x100,
+                                                  uint32_t elapsed_us,
+                                                  uint32_t parsed_value,
+                                                  uint8_t publish)
 {
     uint8_t index = s_single_tank_pcba_report.count;
     AppSingleTankPcbaEntry *entry;
@@ -457,7 +538,38 @@ static void store_single_tank_pcba_entry(uint8_t kind,
         }
     }
     s_single_tank_pcba_report.count = (uint8_t)(index + 1u);
-    AppUsbControl_Task();
+    if (publish != 0u) {
+        AppUsbControl_PublishSingleTankPcbaReport();
+        AppUsbControl_Task();
+    }
+}
+
+static void store_single_tank_pcba_entry(uint8_t kind,
+                                         uint8_t cmd_sent,
+                                         uint8_t ok,
+                                         uint8_t flags,
+                                         const PcbaFrame *response,
+                                         uint32_t current_ua_x100,
+                                         uint32_t elapsed_us,
+                                         uint32_t parsed_value)
+{
+    store_single_tank_pcba_entry_internal(kind, cmd_sent, ok, flags, response,
+                                          current_ua_x100, elapsed_us,
+                                          parsed_value, 1u);
+}
+
+static void store_single_tank_pcba_entry_deferred(uint8_t kind,
+                                                  uint8_t cmd_sent,
+                                                  uint8_t ok,
+                                                  uint8_t flags,
+                                                  const PcbaFrame *response,
+                                                  uint32_t current_ua_x100,
+                                                  uint32_t elapsed_us,
+                                                  uint32_t parsed_value)
+{
+    store_single_tank_pcba_entry_internal(kind, cmd_sent, ok, flags, response,
+                                          current_ua_x100, elapsed_us,
+                                          parsed_value, 0u);
 }
 
 static void reset_single_tank_loop_context(void)
@@ -477,8 +589,14 @@ static void reset_single_tank_loop_context(void)
     s_app.single_tank_last_settled_valid = 0u;
     s_app.single_tank_last_pulse_mode = SINGLE_TANK_PULSE_NONE;
     s_app.single_tank_last_refill_reference_001mmhg = 0u;
+    s_app.single_tank_last_refill_progress_at = 0u;
     s_app.single_tank_last_refill_reference_valid = 0u;
     s_app.single_tank_refill_no_rise_count = 0u;
+    s_app.single_tank_protection_active = 0u;
+    s_app.single_tank_protection_reason = APP_SINGLE_TANK_PROTECTION_NONE;
+    s_app.single_tank_protection_tank_index = 0u;
+    s_app.single_tank_protection_sensor_index = 0u;
+    s_app.single_tank_protection_inlet_valve = 0u;
 }
 
 static void apply_manual_valve_overrides(void)
@@ -572,9 +690,10 @@ static uint32_t pressure_hard_limit_001mmhg(uint32_t target_001mmhg)
     return limit_001mmhg;
 }
 
-static uint32_t single_tank_fast_refill_threshold_001mmhg(uint32_t target_001mmhg)
+static uint32_t single_tank_fast_refill_threshold_001mmhg(uint32_t target_001mmhg,
+                                                          uint32_t tolerance_001mmhg)
 {
-    return (uint32_t)(((uint64_t)target_001mmhg * APP_SINGLE_TANK_FAST_REFILL_PERCENT) / 100u);
+    return target_001mmhg > tolerance_001mmhg ? (target_001mmhg - tolerance_001mmhg) : 0u;
 }
 
 static uint8_t pressure_above_limit_active(PressureSensorIndex sensor, uint32_t limit_001mmhg)
@@ -583,7 +702,7 @@ static uint8_t pressure_above_limit_active(PressureSensorIndex sensor, uint32_t 
         return 0u;
     }
 
-    return AppPressure_Get001mmHg(sensor) >= limit_001mmhg;
+    return AppPressure_GetSafety001mmHg(sensor) >= limit_001mmhg;
 }
 
 static uint8_t any_tank_pressure_above_default_limits_active(void)
@@ -623,16 +742,27 @@ static uint8_t output_pressure_above_limit_active(uint8_t channel_index, uint32_
 
 static uint8_t state_has_blocking_pressure_latch(AppRuntimeState state)
 {
+    uint16_t required_sensor_mask = APP_PRESSURE_ALL_SENSOR_MASK;
+
     if (state == APP_STATE_PCBA_CURRENT_TEST ||
         state == APP_STATE_RTC_DEBUG ||
         state == APP_STATE_PCBA_TIMING_DIAGNOSTIC ||
-        state == APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC) {
+        state == APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC ||
+        state == APP_STATE_SENSOR_CALIBRATION) {
         return 0u;
     }
     if (state == APP_STATE_SINGLE_PCBA_FLOW || s_app.single_pcba_mode != 0u) {
         return 0u;
     }
-    return AppPressure_HasAnyFaultLatched() != 0;
+    if (state == APP_STATE_INIT_TANKS ||
+        state == APP_STATE_AUTO_AIRTIGHTNESS ||
+        state == APP_STATE_READY ||
+        state == APP_STATE_REFILL ||
+        state == APP_STATE_SINGLE_TANK_LOOP) {
+        required_sensor_mask = APP_PRESSURE_TANK_SENSOR_MASK;
+    }
+    return AppPressureScope_HasBlockingFault(AppPressure_GetFaultLatchedMask(),
+                                             required_sensor_mask);
 }
 
 static void single_tank_close_all(const TankLoopSpec *tank)
@@ -676,8 +806,33 @@ static void single_tank_start_fast_refill(const TankLoopSpec *tank, uint32_t cur
     s_app.single_tank_phase_started_at = HAL_GetTick();
     s_app.single_tank_last_sample_at = 0u;
     s_app.single_tank_last_refill_reference_001mmhg = current_pressure_001mmhg;
+    s_app.single_tank_last_refill_progress_at = s_app.single_tank_phase_started_at;
     s_app.single_tank_last_refill_reference_valid = 1u;
     s_app.single_tank_refill_no_rise_count = 0u;
+}
+
+static void single_tank_trip_protection(uint8_t tank_index, AppSingleTankProtectionReason reason)
+{
+    const TankLoopSpec *tank;
+
+    if (tank_index >= APP_TANK_COUNT) {
+        return;
+    }
+
+    tank = &s_tank_loop_specs[tank_index];
+    single_tank_close_all(tank);
+    s_app.step_sent = SINGLE_TANK_PHASE_PROTECTED;
+    s_app.single_tank_phase_started_at = HAL_GetTick();
+    s_app.single_tank_last_sample_at = 0u;
+    s_app.single_tank_sample_accum_001mmhg = 0u;
+    s_app.single_tank_sample_count = 0u;
+    s_app.single_tank_last_refill_reference_valid = 0u;
+    s_app.single_tank_refill_no_rise_count = 0u;
+    s_app.single_tank_protection_active = 1u;
+    s_app.single_tank_protection_reason = (uint8_t)reason;
+    s_app.single_tank_protection_tank_index = tank_index;
+    s_app.single_tank_protection_sensor_index = (uint8_t)tank->sensor;
+    s_app.single_tank_protection_inlet_valve = tank->inlet_valve;
 }
 
 static void single_tank_start_pulse(const TankLoopSpec *tank, SingleTankPulseMode mode)
@@ -714,6 +869,7 @@ static void single_tank_loop_task(void)
     uint32_t hard_limit_001mmhg;
     uint32_t fast_refill_threshold_001mmhg;
     uint32_t pressure_rise_001mmhg;
+    uint32_t fast_refill_progress_delta_001mmhg;
 
     if (s_app.single_tank_active == 0u || tank_index >= APP_TANK_COUNT) {
         AppValves_AllClosed();
@@ -728,12 +884,20 @@ static void single_tank_loop_task(void)
         tolerance = 3u * APP_PRESSURE_SCALE_PER_MMHG;
     }
     hard_limit_001mmhg = pressure_hard_limit_001mmhg(target);
-    fast_refill_threshold_001mmhg = single_tank_fast_refill_threshold_001mmhg(target);
+    fast_refill_threshold_001mmhg = single_tank_fast_refill_threshold_001mmhg(target, tolerance);
     if ((now - s_app.entered_at) >= APP_SINGLE_TANK_MAX_RUNTIME_MS ||
-        pressure_sensor_fault_active(tank->sensor) != 0u ||
         pressure_above_limit_active(tank->sensor, hard_limit_001mmhg) != 0u) {
         single_tank_close_all(tank);
         enter_state(APP_STATE_ERROR);
+        return;
+    }
+    if (pressure_sensor_fault_active(tank->sensor) != 0u) {
+        single_tank_trip_protection(tank_index, APP_SINGLE_TANK_PROTECTION_SENSOR_FAULT);
+        return;
+    }
+    if (s_app.single_tank_protection_active != 0u) {
+        single_tank_close_all(tank);
+        s_app.step_sent = SINGLE_TANK_PHASE_PROTECTED;
         return;
     }
 
@@ -768,9 +932,18 @@ static void single_tank_loop_task(void)
         s_app.single_tank_last_sample_at = now;
         s_app.single_tank_last_settled_pressure_001mmhg = measured;
         s_app.single_tank_last_settled_valid = 1u;
-        if (measured > s_app.single_tank_last_refill_reference_001mmhg) {
+        fast_refill_progress_delta_001mmhg =
+            measured > s_app.single_tank_last_refill_reference_001mmhg ?
+            (measured - s_app.single_tank_last_refill_reference_001mmhg) :
+            0u;
+        if (fast_refill_progress_delta_001mmhg >= APP_SINGLE_TANK_PROGRESS_MIN_RISE_001MMHG) {
             s_app.single_tank_last_refill_reference_001mmhg = measured;
+            s_app.single_tank_last_refill_progress_at = now;
             s_app.single_tank_refill_no_rise_count = 0u;
+        }
+        if ((now - s_app.single_tank_last_refill_progress_at) >= APP_SINGLE_TANK_FAST_REFILL_NO_RISE_TIMEOUT_MS) {
+            single_tank_trip_protection(tank_index, APP_SINGLE_TANK_PROTECTION_NO_PRESSURE_RISE);
+            return;
         }
         if (measured >= fast_refill_threshold_001mmhg) {
             single_tank_close_all(tank);
@@ -848,8 +1021,7 @@ static void single_tank_loop_task(void)
             }
             s_app.single_tank_last_refill_reference_valid = 0u;
             if (s_app.single_tank_refill_no_rise_count >= APP_SINGLE_TANK_MAX_REFILL_NO_RISE_COUNT) {
-                single_tank_close_all(tank);
-                enter_state(APP_STATE_ERROR);
+                single_tank_trip_protection(tank_index, APP_SINGLE_TANK_PROTECTION_NO_PRESSURE_RISE);
                 return;
             }
         }
@@ -868,21 +1040,21 @@ static void single_tank_loop_task(void)
             if (s_app.single_tank_last_pulse_mode == SINGLE_TANK_PULSE_RELIEF &&
                 decision_pressure >= reverse_guard_limit) {
                 single_tank_start_settling();
-            } else if (decision_pressure < fast_refill_threshold_001mmhg) {
+            } else {
                 s_app.single_tank_last_refill_reference_001mmhg = decision_pressure;
                 s_app.single_tank_last_refill_reference_valid = 1u;
                 s_app.single_tank_refill_no_rise_count = 0u;
                 single_tank_start_fast_refill(tank, decision_pressure);
-            } else {
-                s_app.single_tank_last_refill_reference_001mmhg = decision_pressure;
-                s_app.single_tank_last_refill_reference_valid = 1u;
-                single_tank_start_pulse(tank, SINGLE_TANK_PULSE_REFILL);
             }
         } else {
             s_app.single_tank_last_pulse_mode = SINGLE_TANK_PULSE_NONE;
             s_app.single_tank_refill_no_rise_count = 0u;
             s_app.single_tank_last_refill_reference_valid = 0u;
         }
+        return;
+
+    case SINGLE_TANK_PHASE_PROTECTED:
+        single_tank_close_all(tank);
         return;
 
     default:
@@ -1074,10 +1246,9 @@ static void pressure_test_step_single_pcba(PressureSensorIndex sensor,
 static void single_pcba_protocol_cal_step(uint32_t pressure_001mmhg, AppRuntimeState next)
 {
     uint8_t frame[PCBA_FRAME_MAX_SIZE];
-    const uint32_t protocol_pressure = (pressure_001mmhg + 50u) / 100u;
     const size_t len = PcbaProtocol_BuildPressure(PCBA_CMD_SYNC_PRESSURE_CAL,
                                                   s_single_pcba_frame_channel,
-                                                  protocol_pressure,
+                                                  pressure_001mmhg,
                                                   frame,
                                                   sizeof(frame));
 
@@ -1104,7 +1275,6 @@ static void run_pcba_timing_diagnostic(void)
     uint32_t pressure_value = 0u;
     uint8_t boot_frame[PCBA_FRAME_MAX_SIZE];
     size_t boot_len;
-    const uint32_t cal_points[3] = {500u, 1500u, 2500u};
 #define PCBA_TIMING_STOP_IF_FAILED() \
     do { \
         if (s_pcba_timing_stop_on_fail != 0u && \
@@ -1119,11 +1289,12 @@ static void run_pcba_timing_diagnostic(void)
 
     AppValves_AllClosed();
     AppPower_AllOff();
-    diagnostic_delay_ms(50u);
+    diagnostic_delay_ms(1000u);
     AppPower_Enable5V();
-    diagnostic_delay_ms(100u);
+    diagnostic_delay_ms(1000u);
     AppPower_Enable50mATestCircuit(1);
-    diagnostic_delay_ms(20u);
+    diagnostic_delay_ms(APP_SINGLE_PCBA_CURRENT_RANGE_SETTLE_MS);
+    (void)AppCurrent_CaptureAll(APP_CURRENT_MODE_WORK);
 
     AppPcbaUart_FlushRx(s_single_pcba_uart_route);
     if (AppPcbaUart_WakeOneTimed(s_single_pcba_uart_route,
@@ -1166,7 +1337,7 @@ static void run_pcba_timing_diagnostic(void)
                                        &second_elapsed_us);
     }
     response = pcba_has_any_response(&second_response) ? second_response : first_response;
-    elapsed_us = first_elapsed_us + second_elapsed_us;
+    elapsed_us = pcba_has_any_response(&second_response) ? second_elapsed_us : first_elapsed_us;
     store_pcba_timing_entry(1u,
                             PCBA_CMD_SINGLE_POWER_ON,
                             pcba_has_any_response(&first_response) || pcba_has_any_response(&second_response),
@@ -1179,6 +1350,21 @@ static void run_pcba_timing_diagnostic(void)
     PCBA_TIMING_STOP_IF_FAILED();
 
     diagnostic_delay_ms(APP_SINGLE_PCBA_POWER_ON_DELAY_MS);
+
+    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
+    if (AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
+                                      s_single_pcba_frame_channel,
+                                      PCBA_CMD_SET_TEST_MODE,
+                                      &response,
+                                      APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                      &elapsed_us) == 0) {
+        store_pcba_timing_entry(1u, PCBA_CMD_SET_TEST_MODE, 1u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
+    } else {
+        store_pcba_timing_entry(1u, PCBA_CMD_SET_TEST_MODE, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
+    }
+    update_last_pcba_timing_raw_from_frame(&response);
+    PCBA_TIMING_STOP_IF_FAILED();
 
     AppPcbaUart_FlushRx(s_single_pcba_uart_route);
     response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
@@ -1210,74 +1396,29 @@ static void run_pcba_timing_diagnostic(void)
     update_last_pcba_timing_raw_from_frame(&response);
     PCBA_TIMING_STOP_IF_FAILED();
 
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    if (AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
-                                      s_single_pcba_frame_channel,
-                                      PCBA_CMD_SINGLE_RECORD_ZERO_AD,
-                                      &response,
-                                      APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                      &elapsed_us) == 0) {
-        store_pcba_timing_entry(1u, PCBA_CMD_SINGLE_RECORD_ZERO_AD, 1u, response.cmd, response.channel, (uint8_t)response.len, response.len > 0u ? response.data[0] : 0u, elapsed_us);
-    } else {
-        store_pcba_timing_entry(1u, PCBA_CMD_SINGLE_RECORD_ZERO_AD, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
-    }
-    update_last_pcba_timing_raw_from_frame(&response);
-    PCBA_TIMING_STOP_IF_FAILED();
-
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    pressure_value = 0u;
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    if (AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
-                                      s_single_pcba_frame_channel,
-                                      PCBA_CMD_PRESSURE_TEST,
-                                      &response,
-                                      APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                      &elapsed_us) == 0 &&
-        response.cmd == PCBA_CMD_PRESSURE_TEST &&
-        PcbaProtocol_GetU32Le(&response, &pressure_value)) {
-        store_pcba_timing_entry(1u, PCBA_CMD_PRESSURE_TEST, 1u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
-    } else {
-        store_pcba_timing_entry(1u, PCBA_CMD_PRESSURE_TEST, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
-    }
-    update_last_pcba_timing_raw_from_frame(&response);
-    PCBA_TIMING_STOP_IF_FAILED();
-
-    for (uint8_t i = 0u; i < 3u; ++i) {
+    for (uint8_t i = 0u; i < 5u; ++i) {
         AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+        pressure_value = 0u;
         response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-        if (AppPcbaUart_SendPressureRouteTimed(s_single_pcba_uart_route,
-                                               s_single_pcba_frame_channel,
-                                               PCBA_CMD_SYNC_PRESSURE_CAL,
-                                               cal_points[i],
-                                               &response,
-                                               APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                               &elapsed_us) == 0) {
-            store_pcba_timing_entry(1u, PCBA_CMD_SYNC_PRESSURE_CAL, 1u, response.cmd, response.channel, (uint8_t)response.len, response.len > 0u ? response.data[0] : 0u, elapsed_us);
+        if (AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
+                                          s_single_pcba_frame_channel,
+                                          PCBA_CMD_PRESSURE_TEST,
+                                          &response,
+                                          APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                          &elapsed_us) == 0 &&
+            response.crc_ok != 0u &&
+            response.cmd == PCBA_CMD_PRESSURE_TEST &&
+            PcbaProtocol_GetU32Le(&response, &pressure_value)) {
+            store_pcba_timing_entry(1u, PCBA_CMD_PRESSURE_TEST, 1u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
         } else {
-            store_pcba_timing_entry(1u, PCBA_CMD_SYNC_PRESSURE_CAL, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
+            store_pcba_timing_entry(1u, PCBA_CMD_PRESSURE_TEST, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
         }
         update_last_pcba_timing_raw_from_frame(&response);
         PCBA_TIMING_STOP_IF_FAILED();
     }
 
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    if (AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
-                                      s_single_pcba_frame_channel,
-                                      PCBA_CMD_WRITE_FLASH,
-                                      &response,
-                                      APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                      &elapsed_us) == 0) {
-        store_pcba_timing_entry(1u, PCBA_CMD_WRITE_FLASH, 1u, response.cmd, response.channel, (uint8_t)response.len, response.len > 0u ? response.data[0] : 0u, elapsed_us);
-    } else {
-        store_pcba_timing_entry(1u, PCBA_CMD_WRITE_FLASH, 0u, response.cmd, response.channel, (uint8_t)response.len, response.data[0], elapsed_us);
-    }
-    update_last_pcba_timing_raw_from_frame(&response);
-
 finalize:
-    AppPower_Enable45V();
-    AppPower_Enable50mATestCircuit(0);
+    AppPower_AllOff();
     s_pcba_timing_report.running = 0u;
     s_pcba_timing_report.done = 1u;
     s_pcba_timing_report.final_result =
@@ -1299,10 +1440,13 @@ finalize:
 
 static uint8_t pcba_ack_is(const PcbaFrame *response, uint8_t expected)
 {
-    return response != 0 &&
-           response->cmd == PCBA_CMD_ACK &&
-           response->len == 1u &&
-           response->data[0] == expected;
+    if (expected == PCBA_ACK_YES) {
+        return PcbaProtocol_IsSuccessAck(response) ? 1u : 0u;
+    }
+    return response != 0 && response->crc_ok != 0u &&
+           PcbaProtocol_IsOneByteAck(response,
+                                     s_single_pcba_frame_channel,
+                                     expected) ? 1u : 0u;
 }
 
 static uint8_t pcba_has_any_response(const PcbaFrame *response)
@@ -1313,10 +1457,573 @@ static uint8_t pcba_has_any_response(const PcbaFrame *response)
 static uint8_t pcba_version_is_0a0a(const PcbaFrame *response)
 {
     return response != 0 &&
+           response->crc_ok != 0u &&
            response->cmd == PCBA_CMD_SET_TEST_MODE &&
            response->len == 2u &&
            response->data[0] == 0x0Au &&
            response->data[1] == 0x0Au;
+}
+
+static uint8_t pressure_within_tolerance(uint32_t measured,
+                                         uint32_t target,
+                                         uint32_t tolerance)
+{
+    uint32_t delta = measured > target ? (measured - target) : (target - measured);
+    return delta <= tolerance ? 1u : 0u;
+}
+
+static uint8_t single_tank_pcba_drive_first_tank(uint32_t target_001mmhg,
+                                                 SingleTankPcbaTrendCapture *capture,
+                                                 uint8_t *failure_reason)
+{
+    const TankLoopSpec *tank = &s_tank_loop_specs[0];
+    const uint32_t started_at = HAL_GetTick();
+    const uint32_t hard_limit = APP_PRESSURE_HARD_LIMIT_ABS_001MMHG;
+    AppPressureTrendSamples samples = {0};
+    AppPressureTrendFit empty_fit = {0};
+    uint32_t progress_reference = 0u;
+    uint32_t progress_at = started_at;
+    uint32_t valve_closed_at = 0u;
+    uint32_t trend_window_started_at = 0u;
+    uint32_t last_sample_sequence = AppPressure_GetSampleSequence(tank->sensor);
+    uint32_t sample_spacing_ms =
+        s_app.single_tank_pcba_trend_window_ms /
+        (APP_PRESSURE_TREND_MAX_SAMPLES - 1u);
+    uint8_t progress_valid = 0u;
+    uint8_t inlet_opened = 0u;
+    uint8_t target_reached = 0u;
+    uint8_t valid_sample_seen = 0u;
+    uint8_t no_rise_retry_count = 0u;
+
+    if (sample_spacing_ms == 0u) {
+        sample_spacing_ms = 1u;
+    }
+    if (capture != 0) {
+        capture->fit = empty_fit;
+        capture->last_pressure_001mmhg = 0u;
+    }
+    if (failure_reason != 0) {
+        *failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    }
+
+    open_output_to_channel(tank->outlet_valve, s_single_pcba_channel_index);
+    AppValves_Set(tank->inlet_valve, 0u);
+    AppValves_Set(tank->relief_valve, 0u);
+
+    while ((HAL_GetTick() - started_at) < APP_SINGLE_TANK_PCBA_LOOP_TIMEOUT_MS) {
+        uint32_t now;
+        uint32_t measured;
+        uint32_t sample_sequence;
+
+        AppUsbControl_Task();
+        if (single_tank_pcba_diagnostic_active() == 0u) {
+            AppValves_AllClosed();
+            return 0u;
+        }
+        AppPressure_Task();
+        now = HAL_GetTick();
+
+        if (pressure_sensor_fault_active(tank->sensor) != 0u) {
+            AppValves_AllClosed();
+            if (failure_reason != 0) {
+                *failure_reason = APP_PRESSURE_SETTLE_FAILURE_SENSOR_FAULT;
+            }
+            return 0u;
+        }
+        if (!AppPressure_IsValid(tank->sensor)) {
+            AppValves_Set(tank->inlet_valve, 0u);
+            AppValves_Set(tank->relief_valve, 0u);
+            if (inlet_opened != 0u || target_reached != 0u) {
+                if (failure_reason != 0) {
+                    *failure_reason = APP_PRESSURE_SETTLE_FAILURE_SENSOR_INVALID;
+                }
+                return 0u;
+            }
+            diagnostic_delay_ms(10u);
+            continue;
+        }
+
+        sample_sequence = AppPressure_GetSampleSequence(tank->sensor);
+        if (sample_sequence == last_sample_sequence) {
+            diagnostic_delay_ms(5u);
+            continue;
+        }
+        last_sample_sequence = sample_sequence;
+        measured = AppPressure_Get001mmHg(tank->sensor);
+        valid_sample_seen = 1u;
+        if (capture != 0) {
+            capture->last_pressure_001mmhg = measured;
+        }
+        if (AppPressure_GetSafety001mmHg(tank->sensor) >= hard_limit) {
+            AppValves_AllClosed();
+            if (failure_reason != 0) {
+                *failure_reason = APP_PRESSURE_SETTLE_FAILURE_OVERPRESSURE;
+            }
+            return 0u;
+        }
+
+        if (target_reached == 0u) {
+            if (measured >= target_001mmhg) {
+                AppValves_Set(tank->inlet_valve, 0u);
+                target_reached = 1u;
+                progress_valid = 0u;
+                valve_closed_at = now;
+                trend_window_started_at =
+                    now + APP_SINGLE_TANK_PCBA_VALVE_CLOSE_TRANSIENT_MS;
+                diagnostic_delay_ms(5u);
+                continue;
+            }
+
+            if (inlet_opened == 0u) {
+                AppValves_Set(tank->inlet_valve, 1u);
+                inlet_opened = 1u;
+            }
+            if (progress_valid == 0u) {
+                progress_reference = measured;
+                progress_at = now;
+                progress_valid = 1u;
+            } else if (measured >= (progress_reference + APP_SINGLE_TANK_PROGRESS_MIN_RISE_001MMHG)) {
+                progress_reference = measured;
+                progress_at = now;
+            } else if ((now - progress_at) >= APP_SINGLE_TANK_FAST_REFILL_NO_RISE_TIMEOUT_MS) {
+                if (no_rise_retry_count < APP_SINGLE_TANK_FAST_REFILL_RETRY_COUNT) {
+                    ++no_rise_retry_count;
+                    AppValves_AllClosed();
+                    diagnostic_delay_ms(APP_SINGLE_TANK_FAST_REFILL_RETRY_DELAY_MS);
+                    if (single_tank_pcba_diagnostic_active() == 0u) {
+                        return 0u;
+                    }
+                    open_output_to_channel(tank->outlet_valve,
+                                           s_single_pcba_channel_index);
+                    AppValves_Set(tank->inlet_valve, 0u);
+                    AppValves_Set(tank->relief_valve, 0u);
+                    progress_valid = 0u;
+                    inlet_opened = 0u;
+                    continue;
+                }
+                AppValves_AllClosed();
+                if (failure_reason != 0) {
+                    *failure_reason = APP_PRESSURE_SETTLE_FAILURE_NO_PRESSURE_RISE;
+                }
+                return 0u;
+            }
+            diagnostic_delay_ms(5u);
+            continue;
+        }
+
+        AppValves_Set(tank->inlet_valve, 0u);
+        AppValves_Set(tank->relief_valve, 0u);
+        if ((now - valve_closed_at) < APP_SINGLE_TANK_PCBA_VALVE_CLOSE_TRANSIENT_MS) {
+            diagnostic_delay_ms(5u);
+            continue;
+        }
+
+        {
+            const uint32_t trend_elapsed_ms = now - trend_window_started_at;
+            const uint32_t next_sample_due_ms =
+                (uint32_t)samples.count * sample_spacing_ms;
+
+            if (samples.count < APP_PRESSURE_TREND_MAX_SAMPLES &&
+                (samples.count == 0u ||
+                 trend_elapsed_ms >= next_sample_due_ms ||
+                 trend_elapsed_ms >= s_app.single_tank_pcba_trend_window_ms)) {
+                samples.time_ms[samples.count] = now;
+                samples.pressure_001mmhg[samples.count] = measured;
+                ++samples.count;
+            }
+
+            if (trend_elapsed_ms >= s_app.single_tank_pcba_trend_window_ms) {
+                if (capture == 0 ||
+                    AppPressureTrend_FitSamples(&samples, now, &capture->fit) == 0u) {
+                    if (failure_reason != 0) {
+                        *failure_reason = APP_PRESSURE_SETTLE_FAILURE_TREND_SAMPLES;
+                    }
+                    return 0u;
+                }
+                if (AppPressureTrend_IsAcceptable(
+                        &capture->fit,
+                        s_app.single_tank_pcba_trend_max_residual_001mmhg,
+                        s_app.single_tank_pcba_max_drop_rate_001mmhg_per_s) == 0u) {
+                    if (failure_reason != 0) {
+                        if (capture->fit.max_residual_001mmhg >
+                            s_app.single_tank_pcba_trend_max_residual_001mmhg) {
+                            *failure_reason = APP_PRESSURE_SETTLE_FAILURE_TREND_RESIDUAL;
+                        } else if (capture->fit.slope_001mmhg_per_s > 0) {
+                            *failure_reason = APP_PRESSURE_SETTLE_FAILURE_TREND_DIRECTION;
+                        } else {
+                            *failure_reason = APP_PRESSURE_SETTLE_FAILURE_TREND_DROP_RATE;
+                        }
+                    }
+                    return 0u;
+                }
+                return 1u;
+            }
+        }
+
+        diagnostic_delay_ms(5u);
+    }
+
+    AppValves_AllClosed();
+    if (failure_reason != 0) {
+        *failure_reason = valid_sample_seen != 0u ?
+                          APP_PRESSURE_SETTLE_FAILURE_TIMEOUT :
+                          APP_PRESSURE_SETTLE_FAILURE_SENSOR_INVALID;
+    }
+    return 0u;
+}
+
+static uint8_t single_tank_pcba_vent_zero(uint32_t *vented_pressure_001mmhg,
+                                          uint8_t *failure_reason,
+                                          uint8_t ignore_stop)
+{
+    const TankLoopSpec *tank = &s_tank_loop_specs[0];
+    const AppPressureVentLimits vent_limits = {
+        APP_SINGLE_TANK_PCBA_ZERO_MAX_ABS_001MMHG,
+        APP_SINGLE_TANK_PCBA_MATH_SAT_RELEASE_001MMHG,
+        APP_SINGLE_TANK_PCBA_VENT_MIN_OPEN_MS,
+        APP_SINGLE_TANK_PCBA_VENT_ZERO_HOLD_OPEN_MS,
+        APP_SINGLE_TANK_PCBA_VENT_STATIC_SETTLE_MS,
+        APP_SINGLE_TANK_PCBA_ZERO_VALID_SAMPLES
+    };
+    AppPressureVentController vent_controller;
+
+    if (vented_pressure_001mmhg != 0) {
+        *vented_pressure_001mmhg = 0u;
+    }
+    if (failure_reason != 0) {
+        *failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    }
+
+    open_output_to_channel(tank->outlet_valve, s_single_pcba_channel_index);
+    AppValves_Set(tank->inlet_valve, 0u);
+    AppValves_Set(tank->relief_valve, 1u);
+    AppPressureVent_Init(&vent_controller,
+                         HAL_GetTick(),
+                         AppPressure_GetSampleSequence(tank->sensor));
+
+    for (;;) {
+        uint32_t measured;
+        uint32_t sample_sequence;
+        uint32_t last_safe_pressure;
+        uint8_t pressure_valid;
+        uint8_t fault_code;
+        AppPressureVentAction vent_action;
+
+        AppUsbControl_Task();
+        if (ignore_stop == 0u &&
+            single_tank_pcba_diagnostic_active() == 0u) {
+            AppValves_AllClosed();
+            return 0u;
+        }
+        AppPressure_Task();
+
+        pressure_valid = AppPressure_IsValid(tank->sensor) ? 1u : 0u;
+        fault_code = AppPressure_GetFaultCode(tank->sensor);
+        sample_sequence = AppPressure_GetSampleSequence(tank->sensor);
+        measured = pressure_valid != 0u ? AppPressure_Get001mmHg(tank->sensor) : 0u;
+        last_safe_pressure = AppPressure_GetSafety001mmHg(tank->sensor);
+        vent_action = AppPressureVent_Step(
+            &vent_controller,
+            &vent_limits,
+            HAL_GetTick(),
+            sample_sequence,
+            pressure_valid,
+            sample_sequence != 0u ? 1u : 0u,
+            fault_code,
+            measured,
+            last_safe_pressure);
+        AppValves_Set(tank->relief_valve,
+                      vent_action == APP_PRESSURE_VENT_RELIEF_OPEN ? 1u : 0u);
+
+        if (pressure_valid == 0u &&
+            fault_code == APP_PRESSURE_FAULT_MATH_SATURATION) {
+            diagnostic_delay_ms(10u);
+            continue;
+        }
+        if (pressure_sensor_fault_active(tank->sensor) != 0u) {
+            AppValves_AllClosed();
+            if (failure_reason != 0) {
+                *failure_reason = APP_PRESSURE_SETTLE_FAILURE_SENSOR_FAULT;
+            }
+            return 0u;
+        }
+        if (pressure_valid == 0u) {
+            diagnostic_delay_ms(10u);
+            continue;
+        }
+
+        if (vented_pressure_001mmhg != 0) {
+            *vented_pressure_001mmhg = measured;
+        }
+        if (AppPressure_GetSafety001mmHg(tank->sensor) >=
+            APP_PRESSURE_HARD_LIMIT_ABS_001MMHG) {
+            AppValves_AllClosed();
+            if (failure_reason != 0) {
+                *failure_reason = APP_PRESSURE_SETTLE_FAILURE_OVERPRESSURE;
+            }
+            return 0u;
+        }
+
+        if (vent_action == APP_PRESSURE_VENT_ZERO_CONFIRMED) {
+            AppValves_AllClosed();
+            return 1u;
+        }
+        diagnostic_delay_ms(10u);
+    }
+}
+
+static uint32_t single_tank_pcba_locked_prediction(
+    const SingleTankPcbaTrendCapture *capture)
+{
+    if (capture == 0) {
+        return 0u;
+    }
+    if (capture->fit.valid == 0u) {
+        return capture->last_pressure_001mmhg;
+    }
+    return AppPressureTrend_Predict(&capture->fit, HAL_GetTick());
+}
+
+static void single_tank_pcba_store_trend_entry(
+    const SingleTankPcbaTrendCapture *capture,
+    uint32_t locked_pressure_001mmhg,
+    uint8_t ok,
+    uint8_t failure_reason,
+    uint8_t flags,
+    uint8_t deferred)
+{
+    PcbaFrame trend_response = {0};
+    uint32_t residual_001mmhg = 0u;
+    uint32_t elapsed_us = 0u;
+    uint32_t signed_slope = 0u;
+
+    if (capture != 0) {
+        residual_001mmhg = capture->fit.max_residual_001mmhg;
+        elapsed_us = capture->fit.span_ms * 1000u;
+        signed_slope = (uint32_t)capture->fit.slope_001mmhg_per_s;
+        trend_response.cmd = capture->fit.sample_count;
+    }
+    trend_response.len = 4u;
+    trend_response.data[0] = (uint8_t)(residual_001mmhg & 0xFFu);
+    trend_response.data[1] = (uint8_t)((residual_001mmhg >> 8) & 0xFFu);
+    trend_response.data[2] = (uint8_t)((residual_001mmhg >> 16) & 0xFFu);
+    trend_response.data[3] = (uint8_t)((residual_001mmhg >> 24) & 0xFFu);
+
+    if (deferred != 0u) {
+        store_single_tank_pcba_entry_deferred(4u,
+                                              ok != 0u ? 0u : failure_reason,
+                                              ok,
+                                              flags,
+                                              &trend_response,
+                                              signed_slope,
+                                              elapsed_us,
+                                              locked_pressure_001mmhg);
+    } else {
+        store_single_tank_pcba_entry(4u,
+                                     ok != 0u ? 0u : failure_reason,
+                                     ok,
+                                     flags,
+                                     &trend_response,
+                                     signed_slope,
+                                     elapsed_us,
+                                     locked_pressure_001mmhg);
+    }
+}
+
+static SingleTankPcbaPressureStepResult single_tank_pcba_prepare_pressure_step(
+    uint32_t target_001mmhg,
+    uint8_t dependent_command,
+    uint8_t flags,
+    SingleTankPcbaTrendCapture *capture)
+{
+    uint8_t failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    uint32_t locked_pressure_001mmhg;
+
+    if (single_tank_pcba_drive_first_tank(target_001mmhg,
+                                          capture,
+                                          &failure_reason) != 0u) {
+        return SINGLE_TANK_PCBA_PRESSURE_READY;
+    }
+
+    if (single_tank_pcba_diagnostic_active() == 0u) {
+        return SINGLE_TANK_PCBA_PRESSURE_ABORT;
+    }
+
+    locked_pressure_001mmhg = single_tank_pcba_locked_prediction(capture);
+    single_tank_pcba_store_trend_entry(capture,
+                                       locked_pressure_001mmhg,
+                                       0u,
+                                       failure_reason,
+                                       flags,
+                                       0u);
+    if (s_single_tank_pcba_continue_on_fail == 0u ||
+        AppPressureSettle_FailureCanContinue(failure_reason) == 0u) {
+        return SINGLE_TANK_PCBA_PRESSURE_ABORT;
+    }
+
+    store_single_tank_pcba_entry(3u,
+                                 dependent_command,
+                                 0u,
+                                 flags,
+                                 0,
+                                 0u,
+                                 0u,
+                                 target_001mmhg);
+    return SINGLE_TANK_PCBA_PRESSURE_SKIPPED;
+}
+
+static uint8_t single_tank_pcba_send_ack_step(uint8_t cmd,
+                                              uint32_t payload_value,
+                                              uint8_t payload_len,
+                                              uint8_t flags,
+                                              uint32_t parsed_value)
+{
+    PcbaFrame response;
+    uint32_t elapsed_us = 0u;
+    uint8_t data[4];
+    int rc;
+
+    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.raw_len = 0u; response.data[0] = 0u;
+    if (payload_len == 4u) {
+        rc = AppPcbaUart_SendPressureRouteTimed(s_single_pcba_uart_route,
+                                                s_single_pcba_frame_channel,
+                                                cmd,
+                                                payload_value,
+                                                &response,
+                                                APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                                &elapsed_us);
+    } else if (payload_len == 1u) {
+        data[0] = (uint8_t)(payload_value & 0xFFu);
+        rc = AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
+                                            s_single_pcba_frame_channel,
+                                            cmd,
+                                            data,
+                                            1u,
+                                            &response,
+                                            APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                            &elapsed_us);
+    } else {
+        rc = AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
+                                            s_single_pcba_frame_channel,
+                                            cmd,
+                                            0,
+                                            0u,
+                                            &response,
+                                            APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                            &elapsed_us);
+    }
+
+    store_single_tank_pcba_entry(1u,
+                                 cmd,
+                                 (rc == 0 && pcba_ack_is(&response, PCBA_ACK_YES)) ? 1u : 0u,
+                                 flags,
+                                 &response,
+                                 0u,
+                                 elapsed_us,
+                                 parsed_value);
+    return s_single_tank_pcba_report.entries[s_single_tank_pcba_report.count - 1u].ok;
+}
+
+static uint8_t single_tank_pcba_send_calibration_trend_step(
+    uint8_t flags,
+    const SingleTankPcbaTrendCapture *capture)
+{
+    PcbaFrame response;
+    uint32_t elapsed_us = 0u;
+    uint32_t locked_pressure_001mmhg;
+    uint8_t ok;
+    int rc;
+
+    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+    locked_pressure_001mmhg = single_tank_pcba_locked_prediction(capture);
+    response.cmd = 0u;
+    response.channel = 0u;
+    response.len = 0u;
+    response.raw_len = 0u;
+    response.data[0] = 0u;
+    rc = AppPcbaUart_SendPressureRouteTimed(s_single_pcba_uart_route,
+                                            s_single_pcba_frame_channel,
+                                            PCBA_CMD_SYNC_PRESSURE_CAL,
+                                            locked_pressure_001mmhg,
+                                            &response,
+                                            APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                            &elapsed_us);
+    ok = (rc == 0 && pcba_ack_is(&response, PCBA_ACK_YES)) ? 1u : 0u;
+
+    single_tank_pcba_store_trend_entry(capture,
+                                       locked_pressure_001mmhg,
+                                       1u,
+                                       APP_PRESSURE_SETTLE_FAILURE_NONE,
+                                       flags,
+                                       1u);
+    store_single_tank_pcba_entry_deferred(1u,
+                                          PCBA_CMD_SYNC_PRESSURE_CAL,
+                                          ok,
+                                          flags,
+                                          &response,
+                                          0u,
+                                          elapsed_us,
+                                          locked_pressure_001mmhg);
+    AppUsbControl_PublishSingleTankPcbaReport();
+    AppUsbControl_Task();
+    return ok;
+}
+
+static uint8_t single_tank_pcba_query_pressure_step(uint32_t target_001mmhg,
+                                                    uint8_t flags,
+                                                    const SingleTankPcbaTrendCapture *capture,
+                                                    uint8_t store_trend_entry)
+{
+    PcbaFrame response;
+    uint32_t elapsed_us = 0u;
+    uint32_t pressure_001mmhg = UINT32_MAX;
+    uint32_t locked_pressure_001mmhg;
+    const uint32_t tolerance = s_app.pressure_tolerance_001mmhg != 0u ?
+                               s_app.pressure_tolerance_001mmhg :
+                               (3u * APP_PRESSURE_SCALE_PER_MMHG);
+    int rc;
+    uint8_t ok = 0u;
+
+    (void)target_001mmhg;
+    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+    locked_pressure_001mmhg = single_tank_pcba_locked_prediction(capture);
+    rc = AppPcbaUart_RequestRouteTimed(s_single_pcba_uart_route,
+                                       s_single_pcba_frame_channel,
+                                       PCBA_CMD_PRESSURE_TEST,
+                                       &response,
+                                       APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
+                                       &elapsed_us);
+    if (rc == 0 &&
+        response.crc_ok != 0u &&
+        response.cmd == PCBA_CMD_PRESSURE_TEST &&
+        PcbaProtocol_GetPressure001mmHg(&response,
+                                        &pressure_001mmhg) &&
+        pressure_within_tolerance(pressure_001mmhg,
+                                  locked_pressure_001mmhg,
+                                  tolerance) != 0u) {
+        ok = 1u;
+    }
+
+    if (store_trend_entry != 0u) {
+        single_tank_pcba_store_trend_entry(capture,
+                                           locked_pressure_001mmhg,
+                                           1u,
+                                           APP_PRESSURE_SETTLE_FAILURE_NONE,
+                                           flags,
+                                           1u);
+    }
+    store_single_tank_pcba_entry_deferred(1u,
+                                          PCBA_CMD_PRESSURE_TEST,
+                                          ok,
+                                          flags,
+                                          &response,
+                                          locked_pressure_001mmhg,
+                                          elapsed_us,
+                                          pressure_001mmhg);
+    AppUsbControl_PublishSingleTankPcbaReport();
+    AppUsbControl_Task();
+    return ok;
 }
 
 static void run_single_tank_pcba_diagnostic(void)
@@ -1327,9 +2034,14 @@ static void run_single_tank_pcba_diagnostic(void)
     PcbaFrame response;
     PcbaFrame first_response;
     PcbaFrame second_response;
-    uint8_t data_byte;
     uint8_t boot_frame[PCBA_FRAME_MAX_SIZE];
     size_t boot_len;
+    uint32_t settled_pressure;
+    SingleTankPcbaTrendCapture trend_capture;
+    uint8_t vent_failure_reason;
+    uint8_t calibration_success_count = 0u;
+    uint8_t calibration_sequence_valid = 1u;
+    SingleTankPcbaPressureStepResult pressure_step_result;
     const uint8_t flags_standby = SINGLE_TANK_PCBA_FLAG_5V | SINGLE_TANK_PCBA_FLAG_CURRENT;
     const uint8_t flags_work = SINGLE_TANK_PCBA_FLAG_5V | SINGLE_TANK_PCBA_FLAG_50MA | SINGLE_TANK_PCBA_FLAG_CURRENT;
     const uint8_t flags_serial = SINGLE_TANK_PCBA_FLAG_5V | SINGLE_TANK_PCBA_FLAG_50MA;
@@ -1337,13 +2049,30 @@ static void run_single_tank_pcba_diagnostic(void)
 
     reset_single_tank_pcba_report();
     s_single_tank_pcba_report.running = 1u;
+#define SINGLE_TANK_PCBA_ABORT_IF_STOPPED() \
+    do { \
+        if (single_tank_pcba_diagnostic_active() == 0u) { \
+            goto cancelled; \
+        } \
+    } while (0)
+#define SINGLE_TANK_PCBA_STOP_IF_FAILED() \
+    do { \
+        SINGLE_TANK_PCBA_ABORT_IF_STOPPED(); \
+        if (s_single_tank_pcba_continue_on_fail == 0u && \
+            s_single_tank_pcba_report.count > 0u && \
+            s_single_tank_pcba_report.entries[s_single_tank_pcba_report.count - 1u].ok == 0u) { \
+            goto finalize; \
+        } \
+    } while (0)
 
     AppValves_AllClosed();
     AppPower_AllOff();
     AppPower_Enable50mATestCircuit(0);
     diagnostic_delay_ms(1000u);
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
     AppPower_Enable5V();
     diagnostic_delay_ms(1000u);
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
     (void)AppCurrent_CaptureAll(APP_CURRENT_MODE_STANDBY);
     s_single_tank_pcba_report.standby_current_ua_x100 =
         current_ua_to_x100_local(AppCurrent_GetStandbyUa(1u));
@@ -1355,10 +2084,27 @@ static void run_single_tank_pcba_diagnostic(void)
                                  s_single_tank_pcba_report.standby_current_ua_x100,
                                  0u,
                                  0u);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
 
     AppPower_Enable50mATestCircuit(1);
+    diagnostic_delay_ms(APP_SINGLE_PCBA_CURRENT_RANGE_SETTLE_MS);
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
 
     AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+    {
+        uint8_t wake_response = 0u;
+        uint32_t wake_elapsed_us = 0u;
+
+        (void)AppPcbaUart_WakeOneTimed(s_single_pcba_uart_route,
+                                       PCBA_WAKE_RESPONSE_BYTE,
+                                       APP_PCBA_WAKE_RESPONSE_TIMEOUT_MS,
+                                       &wake_elapsed_us,
+                                       &wake_response);
+    }
+    diagnostic_delay_ms(APP_PCBA_POST_WAKE_SETTLE_MS);
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
+    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
+
     boot_len = PcbaProtocol_BuildNoData(PCBA_CMD_SINGLE_POWER_ON,
                                         s_single_pcba_frame_channel,
                                         boot_frame,
@@ -1374,7 +2120,8 @@ static void run_single_tank_pcba_diagnostic(void)
                                        &first_response,
                                        APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
                                        &first_elapsed_us);
-        diagnostic_delay_ms(500u);
+        diagnostic_delay_ms(APP_SINGLE_PCBA_BOOT_RETRY_MS);
+        SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
         (void)AppPcbaUart_SendRawTimed(s_single_pcba_uart_route,
                                        boot_frame,
                                        (uint16_t)boot_len,
@@ -1382,8 +2129,13 @@ static void run_single_tank_pcba_diagnostic(void)
                                        APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
                                        &second_elapsed_us);
     }
-    response = pcba_has_any_response(&second_response) ? second_response : first_response;
-    elapsed_us = first_elapsed_us + second_elapsed_us;
+    if (pcba_has_any_response(&second_response) != 0u) {
+        response = second_response;
+        elapsed_us = second_elapsed_us;
+    } else {
+        response = first_response;
+        elapsed_us = first_elapsed_us;
+    }
     store_single_tank_pcba_entry(1u,
                                  PCBA_CMD_SINGLE_POWER_ON,
                                  pcba_has_any_response(&first_response) || pcba_has_any_response(&second_response),
@@ -1392,6 +2144,7 @@ static void run_single_tank_pcba_diagnostic(void)
                                  0u,
                                  elapsed_us,
                                  response.raw_len);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
 
     (void)AppCurrent_CaptureAll(APP_CURRENT_MODE_WORK);
     s_single_tank_pcba_report.work_current_ua_x100 =
@@ -1404,6 +2157,7 @@ static void run_single_tank_pcba_diagnostic(void)
                                  s_single_tank_pcba_report.work_current_ua_x100,
                                  0u,
                                  0u);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
 
     AppPcbaUart_FlushRx(s_single_pcba_uart_route);
     response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
@@ -1423,9 +2177,11 @@ static void run_single_tank_pcba_diagnostic(void)
                                  0u,
                                  elapsed_us,
                                  response.len >= 2u ? ((uint32_t)response.data[0] | ((uint32_t)response.data[1] << 8)) : 0u);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
 
     AppPower_Enable45V();
     diagnostic_delay_ms(1000u);
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
     AppPcbaUart_FlushRx(s_single_pcba_uart_route);
     response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
     (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
@@ -1438,123 +2194,283 @@ static void run_single_tank_pcba_diagnostic(void)
                                          &elapsed_us);
     store_single_tank_pcba_entry(1u,
                                  PCBA_CMD_SINGLE_QUERY_LOW_POWER,
-                                 pcba_ack_is(&response, PCBA_ACK_YES),
+                                 pcba_ack_is(&response, PCBA_SINGLE_LOW_POWER_ACTIVE),
                                  flags_low_serial,
                                  &response,
                                  0u,
                                  elapsed_us,
                                  response.len > 0u ? response.data[0] : 0u);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
 
     AppPower_Enable5V();
     diagnostic_delay_ms(500u);
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
-                                         s_single_pcba_frame_channel,
-                                         PCBA_CMD_SINGLE_QUERY_NORMAL_POWER,
+    SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
+
+    vent_failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    if (single_tank_pcba_vent_zero(&settled_pressure,
+                                   &vent_failure_reason,
+                                   0u) == 0u) {
+        SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
+        store_single_tank_pcba_entry(5u,
+                                     vent_failure_reason,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     settled_pressure);
+        goto finalize;
+    }
+    (void)single_tank_pcba_send_ack_step(PCBA_CMD_SINGLE_RECORD_ZERO_AD,
+                                         0u,
+                                         0u,
+                                         flags_serial,
+                                         settled_pressure);
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
+
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_50_MMHG,
+                                                                  PCBA_CMD_SYNC_PRESSURE_CAL,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        if (single_tank_pcba_send_calibration_trend_step(flags_serial,
+                                                         &trend_capture) != 0u) {
+            ++calibration_success_count;
+        } else {
+            calibration_sequence_valid = 0u;
+        }
+        SINGLE_TANK_PCBA_STOP_IF_FAILED();
+        (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_50_MMHG,
+                                                   flags_serial,
+                                                   &trend_capture,
+                                                   0u);
+        SINGLE_TANK_PCBA_STOP_IF_FAILED();
+    } else if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_SKIPPED) {
+        calibration_sequence_valid = 0u;
+        store_single_tank_pcba_entry(3u,
+                                     PCBA_CMD_PRESSURE_TEST,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     APP_PRESSURE_50_MMHG);
+    }
+
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_150_MMHG,
+                                                                  PCBA_CMD_SYNC_PRESSURE_CAL,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        if (calibration_sequence_valid != 0u) {
+            if (single_tank_pcba_send_calibration_trend_step(flags_serial,
+                                                             &trend_capture) != 0u) {
+                ++calibration_success_count;
+            } else {
+                calibration_sequence_valid = 0u;
+            }
+            SINGLE_TANK_PCBA_STOP_IF_FAILED();
+            (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_150_MMHG,
+                                                       flags_serial,
+                                                       &trend_capture,
+                                                       0u);
+            SINGLE_TANK_PCBA_STOP_IF_FAILED();
+        } else {
+            single_tank_pcba_store_trend_entry(
+                &trend_capture,
+                single_tank_pcba_locked_prediction(&trend_capture),
+                1u,
+                APP_PRESSURE_SETTLE_FAILURE_NONE,
+                flags_serial,
+                0u);
+            store_single_tank_pcba_entry(3u,
+                                         PCBA_CMD_SYNC_PRESSURE_CAL,
+                                         0u,
+                                         flags_serial,
                                          0,
                                          0u,
-                                         &response,
-                                         APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                         &elapsed_us);
-    store_single_tank_pcba_entry(1u,
-                                 PCBA_CMD_SINGLE_QUERY_NORMAL_POWER,
-                                 pcba_ack_is(&response, PCBA_ACK_YES),
-                                 flags_serial,
-                                 &response,
-                                 0u,
-                                 elapsed_us,
-                                 response.len > 0u ? response.data[0] : 0u);
-
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
-                                         s_single_pcba_frame_channel,
-                                         PCBA_CMD_SINGLE_RECORD_ZERO_AD,
+                                         0u,
+                                         APP_PRESSURE_150_MMHG);
+            store_single_tank_pcba_entry(3u,
+                                         PCBA_CMD_PRESSURE_TEST,
+                                         0u,
+                                         flags_serial,
                                          0,
                                          0u,
-                                         &response,
-                                         APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                         &elapsed_us);
-    store_single_tank_pcba_entry(1u,
-                                 PCBA_CMD_SINGLE_RECORD_ZERO_AD,
-                                 pcba_ack_is(&response, PCBA_ACK_YES),
-                                 flags_serial,
-                                 &response,
-                                 0u,
-                                 elapsed_us,
-                                 response.len > 0u ? response.data[0] : 0u);
+                                         0u,
+                                         APP_PRESSURE_150_MMHG);
+        }
+    } else if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_SKIPPED) {
+        calibration_sequence_valid = 0u;
+        store_single_tank_pcba_entry(3u,
+                                     PCBA_CMD_PRESSURE_TEST,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     APP_PRESSURE_150_MMHG);
+    }
 
-    data_byte = 1u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
-                                         s_single_pcba_frame_channel,
-                                         0x06u,
-                                         &data_byte,
-                                         1u,
-                                         &response,
-                                         APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                         &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x06u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    data_byte = 0u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, 0x06u, &data_byte, 1u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x06u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    data_byte = 1u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, 0x07u, &data_byte, 1u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x07u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    data_byte = 0u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, 0x07u, &data_byte, 1u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x07u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    data_byte = 1u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, 0x08u, &data_byte, 1u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x08u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    data_byte = 0u;
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, 0x08u, &data_byte, 1u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x08u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, data_byte);
-
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendPressureRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, PCBA_CMD_SYNC_PRESSURE_CAL, 500u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, PCBA_CMD_SYNC_PRESSURE_CAL, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, 500u);
-
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendPressureRouteTimed(s_single_pcba_uart_route, s_single_pcba_frame_channel, PCBA_CMD_SYNC_PRESSURE_CAL, 1500u, &response, APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS, &elapsed_us);
-    store_single_tank_pcba_entry(1u, PCBA_CMD_SYNC_PRESSURE_CAL, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, 1500u);
-
-    store_single_tank_pcba_entry(3u, PCBA_CMD_SYNC_PRESSURE_CAL, 1u, flags_serial, 0, 0u, 0u, 2500u);
-
-    AppPcbaUart_FlushRx(s_single_pcba_uart_route);
-    response.cmd = 0u; response.channel = 0u; response.len = 0u; response.data[0] = 0u;
-    (void)AppPcbaUart_SendDataRouteTimed(s_single_pcba_uart_route,
-                                         s_single_pcba_frame_channel,
-                                         0x21u,
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_250_MMHG,
+                                                                  PCBA_CMD_SYNC_PRESSURE_CAL,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        if (calibration_sequence_valid != 0u) {
+            if (single_tank_pcba_send_calibration_trend_step(flags_serial,
+                                                             &trend_capture) != 0u) {
+                ++calibration_success_count;
+            } else {
+                calibration_sequence_valid = 0u;
+            }
+            SINGLE_TANK_PCBA_STOP_IF_FAILED();
+            (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_250_MMHG,
+                                                       flags_serial,
+                                                       &trend_capture,
+                                                       0u);
+            SINGLE_TANK_PCBA_STOP_IF_FAILED();
+        } else {
+            single_tank_pcba_store_trend_entry(
+                &trend_capture,
+                single_tank_pcba_locked_prediction(&trend_capture),
+                1u,
+                APP_PRESSURE_SETTLE_FAILURE_NONE,
+                flags_serial,
+                0u);
+            store_single_tank_pcba_entry(3u,
+                                         PCBA_CMD_SYNC_PRESSURE_CAL,
+                                         0u,
+                                         flags_serial,
                                          0,
                                          0u,
-                                         &response,
-                                         APP_SINGLE_PCBA_RESPONSE_TIMEOUT_MS,
-                                         &elapsed_us);
-    store_single_tank_pcba_entry(1u, 0x21u, pcba_ack_is(&response, PCBA_ACK_YES), flags_serial, &response, 0u, elapsed_us, response.len > 0u ? response.data[0] : 0u);
+                                         0u,
+                                         APP_PRESSURE_250_MMHG);
+            store_single_tank_pcba_entry(3u,
+                                         PCBA_CMD_PRESSURE_TEST,
+                                         0u,
+                                         flags_serial,
+                                         0,
+                                         0u,
+                                         0u,
+                                         APP_PRESSURE_250_MMHG);
+        }
+    } else if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_SKIPPED) {
+        calibration_sequence_valid = 0u;
+        store_single_tank_pcba_entry(3u,
+                                     PCBA_CMD_PRESSURE_TEST,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     APP_PRESSURE_250_MMHG);
+    }
 
+    if (calibration_sequence_valid != 0u &&
+        calibration_success_count == 3u) {
+        (void)single_tank_pcba_send_ack_step(PCBA_CMD_WRITE_FLASH,
+                                             0u,
+                                             0u,
+                                             flags_serial,
+                                             calibration_success_count);
+    } else {
+        store_single_tank_pcba_entry(3u,
+                                     PCBA_CMD_WRITE_FLASH,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     calibration_success_count);
+    }
+    SINGLE_TANK_PCBA_STOP_IF_FAILED();
+
+    vent_failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    if (single_tank_pcba_vent_zero(&settled_pressure,
+                                   &vent_failure_reason,
+                                   0u) == 0u) {
+        SINGLE_TANK_PCBA_ABORT_IF_STOPPED();
+        store_single_tank_pcba_entry(5u,
+                                     vent_failure_reason,
+                                     0u,
+                                     flags_serial,
+                                     0,
+                                     0u,
+                                     0u,
+                                     settled_pressure);
+        goto finalize;
+    }
+
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_100_MMHG,
+                                                                  PCBA_CMD_PRESSURE_TEST,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_100_MMHG,
+                                                   flags_serial,
+                                                   &trend_capture,
+                                                   1u);
+        SINGLE_TANK_PCBA_STOP_IF_FAILED();
+    }
+
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_200_MMHG,
+                                                                  PCBA_CMD_PRESSURE_TEST,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_200_MMHG,
+                                                   flags_serial,
+                                                   &trend_capture,
+                                                   1u);
+        SINGLE_TANK_PCBA_STOP_IF_FAILED();
+    }
+
+    pressure_step_result = single_tank_pcba_prepare_pressure_step(APP_PRESSURE_285_MMHG,
+                                                                  PCBA_CMD_PRESSURE_TEST,
+                                                                  flags_serial,
+                                                                  &trend_capture);
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_ABORT) {
+        goto finalize;
+    }
+    if (pressure_step_result == SINGLE_TANK_PCBA_PRESSURE_READY) {
+        (void)single_tank_pcba_query_pressure_step(APP_PRESSURE_285_MMHG,
+                                                   flags_serial,
+                                                   &trend_capture,
+                                                   1u);
+        SINGLE_TANK_PCBA_STOP_IF_FAILED();
+    }
+
+    (void)single_tank_pcba_send_ack_step(0x21u,
+                                         0u,
+                                         0u,
+                                         flags_serial,
+                                         0u);
+
+finalize:
     diagnostic_delay_ms(500u);
     AppPower_Enable50mATestCircuit(0);
     AppPower_AllOff();
+    vent_failure_reason = APP_PRESSURE_SETTLE_FAILURE_NONE;
+    (void)single_tank_pcba_vent_zero(&settled_pressure,
+                                     &vent_failure_reason,
+                                     1u);
+    AppValves_AllClosed();
     s_single_tank_pcba_report.running = 0u;
     s_single_tank_pcba_report.done = 1u;
     s_single_tank_pcba_report.final_result =
@@ -1565,6 +2481,17 @@ static void run_single_tank_pcba_diagnostic(void)
             break;
         }
     }
+    AppUsbControl_PublishSingleTankPcbaReport();
+    s_app.running = 0u;
+    if (s_app.state == APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC) {
+        enter_state(APP_STATE_READY);
+    }
+#undef SINGLE_TANK_PCBA_ABORT_IF_STOPPED
+#undef SINGLE_TANK_PCBA_STOP_IF_FAILED
+    return;
+
+cancelled:
+    goto finalize;
 }
 
 void AppStateMachine_Init(AppBootMode mode)
@@ -1578,11 +2505,18 @@ void AppStateMachine_Init(AppBootMode mode)
     s_pcba_timing_stop_on_fail = 0u;
     s_pcba_timing_requested = 0u;
     s_single_tank_pcba_requested = 0u;
+    s_single_tank_pcba_continue_on_fail = 0u;
     reset_pcba_timing_report();
     reset_single_tank_pcba_report();
     clear_manual_valve_overrides();
     reset_single_tank_loop_context();
     s_app.pressure_tolerance_001mmhg = 3u * APP_PRESSURE_SCALE_PER_MMHG;
+    s_app.single_tank_pcba_trend_max_residual_001mmhg =
+        APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_DEFAULT_001MMHG;
+    s_app.single_tank_pcba_trend_window_ms =
+        APP_SINGLE_TANK_PCBA_TREND_WINDOW_DEFAULT_MS;
+    s_app.single_tank_pcba_max_drop_rate_001mmhg_per_s =
+        APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_DEFAULT_001MMHG_PER_S;
     for (uint8_t i = 0u; i < APP_PRESSURE_SENSOR_COUNT; ++i) {
         s_pressure_invalid_since[i] = 0u;
     }
@@ -1590,7 +2524,9 @@ void AppStateMachine_Init(AppBootMode mode)
     AppPower_AllOff();
     AppValves_AllClosed();
     AppCurrent_Init();
+    AppPressureCalibration_Init();
     AppPressure_Init();
+    AppSensorCalibration_Init();
     AppPcbaUart_Init();
 
     if (mode == APP_MODE_USB_MSC) {
@@ -1610,6 +2546,7 @@ void AppStateMachine_Task(void)
     if (s_app.state != APP_STATE_USB_MSC &&
         s_app.state != APP_STATE_ERROR &&
         s_app.state != APP_STATE_SINGLE_TANK_LOOP &&
+        s_app.state != APP_STATE_SENSOR_CALIBRATION &&
         state_has_blocking_pressure_latch(s_app.state) != 0u) {
         enter_state(APP_STATE_ERROR);
     }
@@ -2000,13 +2937,21 @@ void AppStateMachine_Task(void)
         }
         break;
 
+    case APP_STATE_SENSOR_CALIBRATION:
+        AppPower_AllOff();
+        clear_manual_valve_overrides();
+        AppSensorCalibration_Task();
+        break;
+
     default:
         AppValves_AllClosed();
         AppPower_AllOff();
         break;
     }
 
-    apply_manual_valve_overrides();
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        apply_manual_valve_overrides();
+    }
 }
 
 AppRuntimeState AppStateMachine_GetState(void)
@@ -2016,10 +2961,12 @@ AppRuntimeState AppStateMachine_GetState(void)
 
 int AppStateMachine_RequestStart(void)
 {
-    if (s_app.state == APP_STATE_USB_MSC) {
+    if (s_app.state == APP_STATE_USB_MSC ||
+        s_app.state == APP_STATE_SENSOR_CALIBRATION) {
         return -1;
     }
-    if (AppPressure_HasAnyFaultLatched() != 0) {
+    if (AppPressureScope_HasBlockingFault(AppPressure_GetFaultLatchedMask(),
+                                          APP_PRESSURE_TANK_SENSOR_MASK) != 0u) {
         AppValves_AllClosed();
         AppPower_AllOff();
         enter_state(APP_STATE_ERROR);
@@ -2054,17 +3001,26 @@ int AppStateMachine_RequestStop(void)
     s_app.pcba_current_50ma_enabled = 0u;
     s_app.single_pcba_mode = 0u;
     s_pcba_timing_stop_on_fail = 0u;
+    s_single_tank_pcba_requested = 0u;
+    s_single_tank_pcba_continue_on_fail = 0u;
     clear_manual_valve_overrides();
     reset_single_tank_loop_context();
     AppValves_AllClosed();
     AppPower_AllOff();
-    enter_state(AppPressure_HasAnyFaultLatched() != 0 ? APP_STATE_ERROR : APP_STATE_READY);
+    enter_state(AppPressureScope_HasBlockingFault(AppPressure_GetFaultLatchedMask(),
+                                                  APP_PRESSURE_TANK_SENSOR_MASK) != 0u ?
+                APP_STATE_ERROR : APP_STATE_READY);
     return 0;
 }
 
 int AppStateMachine_RequestPause(void)
 {
     if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+    if (s_app.state == APP_STATE_SENSOR_CALIBRATION) {
+        (void)AppSensorCalibration_Jog(APP_SENSOR_CAL_ACTUATOR_STOP, 0u);
+        AppValves_AllClosed();
         return -1;
     }
     s_app.paused = 1u;
@@ -2082,7 +3038,8 @@ int AppStateMachine_RequestResume(void)
 
 int AppStateMachine_RequestState(AppRuntimeState state)
 {
-    if (state >= APP_STATE_COUNT || state == APP_STATE_USB_MSC) {
+    if (state >= APP_STATE_COUNT || state == APP_STATE_USB_MSC ||
+        state == APP_STATE_SENSOR_CALIBRATION) {
         return -1;
     }
     if (state_has_blocking_pressure_latch(state) != 0u && state != APP_STATE_ERROR) {
@@ -2149,6 +3106,10 @@ uint8_t AppStateMachine_IsError(void)
 
 void AppStateMachine_SetManualMode(uint8_t enabled)
 {
+    if (s_app.state == APP_STATE_SENSOR_CALIBRATION) {
+        clear_manual_valve_overrides();
+        return;
+    }
     if (AppPressure_HasAnyFaultLatched() != 0 || s_app.state == APP_STATE_ERROR) {
         clear_manual_valve_overrides();
         return;
@@ -2162,6 +3123,10 @@ void AppStateMachine_SetManualMode(uint8_t enabled)
 
 void AppStateMachine_SetManualValve(uint8_t valve_number, uint8_t open)
 {
+    if (s_app.state == APP_STATE_SENSOR_CALIBRATION) {
+        clear_manual_valve_overrides();
+        return;
+    }
     if (AppPressure_HasAnyFaultLatched() != 0 || s_app.state == APP_STATE_ERROR) {
         clear_manual_valve_overrides();
         return;
@@ -2183,6 +3148,10 @@ void AppStateMachine_SetManualValve(uint8_t valve_number, uint8_t open)
 
 void AppStateMachine_SetManualValveMask(uint32_t valve_mask, uint32_t open_mask)
 {
+    if (s_app.state == APP_STATE_SENSOR_CALIBRATION) {
+        clear_manual_valve_overrides();
+        return;
+    }
     if (AppPressure_HasAnyFaultLatched() != 0 || s_app.state == APP_STATE_ERROR) {
         clear_manual_valve_overrides();
         return;
@@ -2233,7 +3202,12 @@ int AppStateMachine_RequestSingleTankLoop(uint8_t tank_index,
     if (pressure_sensor_fault_latched(tank->sensor) != 0u) {
         AppValves_AllClosed();
         AppPower_AllOff();
-        enter_state(APP_STATE_ERROR);
+        s_app.single_tank_active = 1u;
+        s_app.single_tank_index = tank_index;
+        s_app.single_tank_target_001mmhg = target_001mmhg;
+        s_app.single_tank_tolerance_001mmhg = tolerance_001mmhg;
+        single_tank_trip_protection(tank_index, APP_SINGLE_TANK_PROTECTION_SENSOR_FAULT);
+        s_app.running = 0u;
         return -1;
     }
     if (target_001mmhg == 0u || target_001mmhg > APP_MPRLS_PRESSURE_MAX_001MMHG) {
@@ -2274,7 +3248,7 @@ int AppStateMachine_StopSingleTankLoop(void)
     s_app.paused = 0u;
     AppValves_AllClosed();
     AppPower_AllOff();
-    enter_state(AppPressure_HasAnyFaultLatched() != 0 ? APP_STATE_ERROR : APP_STATE_READY);
+    enter_state(APP_STATE_READY);
     return 0;
 }
 
@@ -2301,6 +3275,31 @@ uint32_t AppStateMachine_GetSingleTankTarget001mmHg(void)
 uint32_t AppStateMachine_GetSingleTankTolerance001mmHg(void)
 {
     return s_app.single_tank_tolerance_001mmhg;
+}
+
+uint8_t AppStateMachine_IsSingleTankProtectionActive(void)
+{
+    return s_app.single_tank_protection_active;
+}
+
+uint8_t AppStateMachine_GetSingleTankProtectionReason(void)
+{
+    return s_app.single_tank_protection_reason;
+}
+
+uint8_t AppStateMachine_GetSingleTankProtectionTankIndex(void)
+{
+    return s_app.single_tank_protection_tank_index;
+}
+
+uint8_t AppStateMachine_GetSingleTankProtectionSensorIndex(void)
+{
+    return s_app.single_tank_protection_sensor_index;
+}
+
+uint8_t AppStateMachine_GetSingleTankProtectionInletValve(void)
+{
+    return s_app.single_tank_protection_inlet_valve;
 }
 
 void AppStateMachine_SetPcbaCurrent50mAEnabled(uint8_t enabled)
@@ -2392,9 +3391,28 @@ void AppStateMachine_GetPcbaTimingReport(AppPcbaTimingReport *report)
     *report = s_pcba_timing_report;
 }
 
-int AppStateMachine_RequestSingleTankPcbaDiagnostic(void)
+int AppStateMachine_RequestSingleTankPcbaDiagnostic(
+    uint8_t continue_on_fail,
+    uint32_t trend_max_residual_001mmhg,
+    uint32_t trend_window_ms,
+    uint32_t max_drop_rate_001mmhg_per_s)
 {
-    if (s_app.state == APP_STATE_USB_MSC) {
+    if (s_app.state == APP_STATE_USB_MSC ||
+        s_app.state == APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC ||
+        s_single_tank_pcba_requested != 0u ||
+        s_single_tank_pcba_report.running != 0u) {
+        return -1;
+    }
+    if (trend_max_residual_001mmhg <
+            APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_MIN_001MMHG ||
+        trend_max_residual_001mmhg >
+            APP_SINGLE_TANK_PCBA_TREND_MAX_RESIDUAL_MAX_001MMHG ||
+        trend_window_ms < APP_SINGLE_TANK_PCBA_TREND_WINDOW_MIN_MS ||
+        trend_window_ms > APP_SINGLE_TANK_PCBA_TREND_WINDOW_MAX_MS ||
+        max_drop_rate_001mmhg_per_s <
+            APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_MIN_001MMHG_PER_S ||
+        max_drop_rate_001mmhg_per_s >
+            APP_SINGLE_TANK_PCBA_MAX_DROP_RATE_LIMIT_001MMHG_PER_S) {
         return -1;
     }
 
@@ -2402,6 +3420,11 @@ int AppStateMachine_RequestSingleTankPcbaDiagnostic(void)
     s_app.single_pcba_mode = 0u;
     s_app.running = 1u;
     s_app.paused = 0u;
+    s_app.single_tank_pcba_trend_max_residual_001mmhg =
+        trend_max_residual_001mmhg;
+    s_app.single_tank_pcba_trend_window_ms = trend_window_ms;
+    s_app.single_tank_pcba_max_drop_rate_001mmhg_per_s = max_drop_rate_001mmhg_per_s;
+    s_single_tank_pcba_continue_on_fail = continue_on_fail != 0u ? 1u : 0u;
     s_single_tank_pcba_requested = 1u;
     reset_single_tank_pcba_report();
     enter_state(APP_STATE_SINGLE_TANK_PCBA_DIAGNOSTIC);
@@ -2431,4 +3454,95 @@ uint8_t AppStateMachine_IsPcbaProbeServiceDue(void)
     const uint32_t total = s_pcba_timing_pass_count + s_pcba_timing_fail_count;
 
     return (total != 0u && (total % APP_PCBA_PROBE_SERVICE_INTERVAL) == 0u) ? 1u : 0u;
+}
+
+int AppStateMachine_RequestSensorCalibrationEnter(uint8_t in_place_mode,
+                                                  uint8_t destination_slot)
+{
+    if (s_app.state == APP_STATE_USB_MSC) {
+        return -1;
+    }
+    if (s_app.state == APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+
+    s_app.running = 0u;
+    s_app.paused = 0u;
+    s_app.single_pcba_mode = 0u;
+    clear_manual_valve_overrides();
+    reset_single_tank_loop_context();
+    AppPower_AllOff();
+    AppValves_AllClosed();
+    if (AppSensorCalibration_Enter(in_place_mode, destination_slot) != 0) {
+        return -1;
+    }
+    enter_state(APP_STATE_SENSOR_CALIBRATION);
+    return 0;
+}
+
+int AppStateMachine_RequestSensorCalibrationExit(void)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    AppValves_AllClosed();
+    AppPower_AllOff();
+    enter_state(AppPressure_HasAnyFaultLatched() != 0 ? APP_STATE_ERROR : APP_STATE_READY);
+    return 0;
+}
+
+int AppStateMachine_SensorCalibrationJog(uint8_t actuator, uint16_t lease_ms)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_Jog(actuator, lease_ms);
+}
+
+int AppStateMachine_SensorCalibrationStartAutoVent(void)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_StartAutoVent();
+}
+
+int AppStateMachine_SensorCalibrationCancelAutoVent(void)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_CancelAutoVent();
+}
+
+int AppStateMachine_SensorCalibrationRecord(uint8_t point_index, uint32_t actual_001mmhg)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_Record(point_index, actual_001mmhg);
+}
+
+int AppStateMachine_SensorCalibrationSaveSlot(uint8_t slot)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_SaveSlot(slot);
+}
+
+int AppStateMachine_SensorCalibrationClearSlot(uint8_t slot)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_ClearSlot(slot);
+}
+
+int AppStateMachine_SensorCalibrationResetSession(void)
+{
+    if (s_app.state != APP_STATE_SENSOR_CALIBRATION) {
+        return -1;
+    }
+    return AppSensorCalibration_ResetSession();
 }

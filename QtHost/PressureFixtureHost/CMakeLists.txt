@@ -11,6 +11,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 qt_add_executable(PressureFixtureHost
     src/main.cpp
     src/ArchitectureView.cpp
+    src/IntelHexValidator.cpp
     src/MainWindow.cpp
     src/PressureFixtureModel.cpp
     src/UsbControlProtocol.cpp

@@ -11,6 +11,7 @@ INCLUDEPATH += $$PWD/../include
 SOURCES += \
     mainwindow_rtt_smoke.cpp \
     ../src/ArchitectureView.cpp \
+    ../src/IntelHexValidator.cpp \
     ../src/MainWindow.cpp \
     ../src/PressureFixtureModel.cpp \
     ../src/UsbControlProtocol.cpp \
@@ -18,6 +19,7 @@ SOURCES += \
 
 HEADERS += \
     ../include/ArchitectureView.h \
+    ../include/IntelHexValidator.h \
     ../include/MainWindow.h \
     ../include/PressureFixtureModel.h \
     ../include/UsbControlProtocol.h \

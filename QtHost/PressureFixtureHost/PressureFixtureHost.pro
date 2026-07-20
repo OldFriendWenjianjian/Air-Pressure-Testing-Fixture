@@ -1,4 +1,4 @@
-QT += core gui widgets network
+QT += core gui widgets network charts
 
 CONFIG += c++17
 CONFIG -= app_bundle
@@ -11,6 +11,7 @@ INCLUDEPATH += $$PWD/include
 SOURCES += \
     src/main.cpp \
     src/ArchitectureView.cpp \
+    src/IntelHexValidator.cpp \
     src/MainWindow.cpp \
     src/PressureFixtureModel.cpp \
     src/UsbControlProtocol.cpp \
@@ -18,6 +19,7 @@ SOURCES += \
 
 HEADERS += \
     include/ArchitectureView.h \
+    include/IntelHexValidator.h \
     include/MainWindow.h \
     include/PressureFixtureModel.h \
     include/UsbControlProtocol.h \

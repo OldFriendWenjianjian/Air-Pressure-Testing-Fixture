@@ -12,8 +12,8 @@ using namespace fixture;
 
 static void dumpBytesHex(const QByteArray &bytes)
 {
-    std::fprintf(stdout, "RX bytes len=%d hex=%s\n",
-                 bytes.size(),
+    std::fprintf(stdout, "RX bytes len=%lld hex=%s\n",
+                 static_cast<long long>(bytes.size()),
                  bytes.toHex().toUpper().constData());
 }
 
@@ -22,6 +22,42 @@ int main(int argc, char **argv)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     QCoreApplication app(argc, argv);
+
+    if (QCoreApplication::arguments().contains(QStringLiteral("--classify-only"))) {
+        const bool fixtureMatches = WindowsSerialTransport::isFixtureUsbIdentity(
+            QStringLiteral("USB\\VID_0483&PID_5740\\PF202601"),
+            QStringLiteral("Pressure Fixture CDC"),
+            QStringLiteral("PF202601"));
+        const bool genericStm32Rejected = !WindowsSerialTransport::isFixtureUsbIdentity(
+            QStringLiteral("USB\\VID_0483&PID_5740\\STM32VCP"),
+            QStringLiteral("STM32 Virtual COM Port"),
+            QStringLiteral("STM32VCP"));
+        const bool jlinkRejected = !WindowsSerialTransport::isFixtureUsbIdentity(
+            QStringLiteral("USB\\VID_1366&PID_0105\\000069730390"),
+            QStringLiteral("J-Link"),
+            QStringLiteral("000069730390"));
+        const bool ok = fixtureMatches && genericStm32Rejected && jlinkRejected;
+        std::fprintf(stdout, "fixture USB identity classification %s\n", ok ? "ok" : "failed");
+        return ok ? 0 : 7;
+    }
+
+    if (QCoreApplication::arguments().contains(QStringLiteral("--enumerate-only"))) {
+        bool fixtureFound = false;
+        const auto ports = WindowsSerialTransport::availablePortInfos();
+        for (const auto &port : ports) {
+            std::fprintf(stdout,
+                         "%s fixture=%d segger=%d product=%s serial=%s instance=%s\n",
+                         port.portName.toLocal8Bit().constData(),
+                         port.isFixtureUsbCdc ? 1 : 0,
+                         port.isSegger ? 1 : 0,
+                         port.productName.toLocal8Bit().constData(),
+                         port.serialNumber.toLocal8Bit().constData(),
+                         port.instanceId.toLocal8Bit().constData());
+            fixtureFound = fixtureFound || port.isFixtureUsbCdc;
+        }
+        std::fprintf(stdout, "fixture USB CDC enumeration %s\n", fixtureFound ? "ok" : "failed");
+        return fixtureFound ? 0 : 6;
+    }
 
     const QString portName = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("COM5");
 
@@ -46,10 +82,10 @@ int main(int argc, char **argv)
                 std::fprintf(stderr, "RX discard: %s\n", parsed.error.toLocal8Bit().constData());
                 continue;
             }
-            std::fprintf(stdout, "RX frame cmd=%u seq=%u len=%d\n",
+            std::fprintf(stdout, "RX frame cmd=%u seq=%u len=%lld\n",
                          static_cast<unsigned>(parsed.frame.command),
                          static_cast<unsigned>(parsed.frame.sequence),
-                         parsed.frame.payload.size());
+                         static_cast<long long>(parsed.frame.payload.size()));
             if (parsed.frame.command == usb::Hello) {
                 gotHello = true;
             } else if (parsed.frame.command == usb::StatusSnapshot) {
